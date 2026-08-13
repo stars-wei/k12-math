@@ -1,0 +1,24 @@
+# Credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+
+# Python runtime artefacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Generated solver output
+result.html
+answer.html
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
