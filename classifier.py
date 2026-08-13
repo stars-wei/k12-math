@@ -10,6 +10,7 @@ from solve import OPERATIONS, load_operations, query_neo4j
 
 
 TASK_KEYWORDS = {
+    "quadratic-function-vertex": ("顶点", "顶点坐标"),
     "quadratic-function-axis": ("对称轴",),
     "quadratic-function-extremum": ("最值", "最大值", "最小值", "极值", "极大值", "极小值"),
 }

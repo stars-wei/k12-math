@@ -7,6 +7,8 @@ import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from errors import ConfigurationError, UpstreamServiceError
+
 
 # DeepSeek strict function calling is currently exposed through the beta URL.
 API_URL = "https://api.deepseek.com/beta/chat/completions"
@@ -17,7 +19,7 @@ class DeepSeekClient:
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         self.model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
         if not self.api_key:
-            raise RuntimeError("未设置环境变量 DEEPSEEK_API_KEY")
+            raise ConfigurationError("未设置 DEEPSEEK_API_KEY，无法进行题目解析。")
 
     def _tool_call(
         self,
@@ -66,10 +68,11 @@ class DeepSeekClient:
             with urlopen(request, timeout=30) as response:
                 payload = json.load(response)
         except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"DeepSeek API 请求失败：HTTP {error.code}：{detail}") from error
+            raise UpstreamServiceError(
+                f"DeepSeek 题目解析服务请求失败（HTTP {error.code}），请稍后重试。"
+            ) from error
         except URLError as error:
-            raise RuntimeError(f"无法连接 DeepSeek API：{error.reason}") from error
+            raise UpstreamServiceError("无法连接 DeepSeek 题目解析服务，请检查网络后重试。") from error
 
         try:
             tool_call = payload["choices"][0]["message"]["tool_calls"][0]
@@ -77,9 +80,9 @@ class DeepSeekClient:
                 raise KeyError("unexpected function")
             result = json.loads(tool_call["function"]["arguments"])
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-            raise RuntimeError("DeepSeek 未返回预期的选择函数调用") from error
+            raise UpstreamServiceError("DeepSeek 未返回可用的题目解析结果，请稍后重试。") from error
         if not isinstance(result, dict):
-            raise RuntimeError("DeepSeek 返回的 JSON 不是对象")
+            raise UpstreamServiceError("DeepSeek 返回的题目解析格式无效，请稍后重试。")
         return result
 
     def extract_problems(self, question: str) -> dict:

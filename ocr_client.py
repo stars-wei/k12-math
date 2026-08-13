@@ -8,6 +8,8 @@ import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from errors import ConfigurationError, UpstreamServiceError
+
 
 API_URL = "https://api.siliconflow.cn/v1/chat/completions"
 MODEL = "deepseek-ai/DeepSeek-OCR"
@@ -21,7 +23,7 @@ class OcrClient:
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.getenv("SILICONFLOW_API_KEY")
         if not self.api_key:
-            raise RuntimeError("未设置环境变量 SILICONFLOW_API_KEY")
+            raise ConfigurationError("未设置 SILICONFLOW_API_KEY，无法识别题目截图。")
 
     def transcribe(self, image: bytes, media_type: str) -> str:
         if media_type not in ALLOWED_IMAGE_TYPES:
@@ -48,14 +50,15 @@ class OcrClient:
             with urlopen(request, timeout=90) as response:
                 result = json.load(response)
         except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"SiliconFlow OCR 请求失败：HTTP {error.code}：{detail}") from error
+            raise UpstreamServiceError(
+                f"题目图片识别服务请求失败（HTTP {error.code}），请稍后重试。"
+            ) from error
         except URLError as error:
-            raise RuntimeError(f"无法连接 SiliconFlow OCR：{error.reason}") from error
+            raise UpstreamServiceError("无法连接题目图片识别服务，请检查网络后重试。") from error
         try:
             text = result["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as error:
-            raise RuntimeError("DeepSeek-OCR 未返回文字结果") from error
+            raise UpstreamServiceError("题目图片识别服务未返回文字结果，请换一张更清晰的图片。") from error
         if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("DeepSeek-OCR 未识别出题干文字")
+            raise UpstreamServiceError("未能从图片中识别出题干，请换一张更清晰的图片。")
         return text.strip()

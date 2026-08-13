@@ -13,8 +13,8 @@ htmlcov/
 venv/
 
 # Generated solver output
-result.html
-answer.html
+/result.html
+/answer.html
 
 # Editor and operating-system files
 .vscode/
