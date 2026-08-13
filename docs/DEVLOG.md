@@ -27,3 +27,8 @@
 - Made unsupported tasks explicitly state that no answer was produced for that requirement.
 - Added safe, service-specific user messages for OCR, DeepSeek, Neo4j, and strategy-execution failures; browser disconnects no longer produce a server traceback.
 - Expanded regression coverage for vertex recognition, fact reuse, semantic answers, and unsupported-task messaging.
+
+### Source-tree refactor
+
+- Moved executable Python modules into `src/`, tests into `tests/`, the development log into `docs/`, and Neo4j migrations into `graph/migrations/`.
+- Kept the source layout intentionally flat: the project is not yet distributed as an installable Python package, so there is no additional package-name directory under `src/`.
