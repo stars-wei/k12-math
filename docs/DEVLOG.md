@@ -10,6 +10,11 @@
 - Confirmed the current implementation already supports OCR input, compound-task recognition, and graph-backed execution for quadratic-function axis and extremum tasks.
 - Identified that the next version should improve result semantics, remove duplicate answers, consistently render inline mathematics, make task relationships explicit, surface unsupported tasks clearly, reuse shared intermediate results, and improve user-facing failure messages.
 
+### Source-tree refactor
+
+- Moved executable Python modules into `src/`, tests into `tests/`, and this development log into `docs/`.
+- Kept `src/` flat because this MVP is not yet distributed as an installable Python package.
+
 ### Version 1 publication
 
 - Created the public GitHub repository `stars-wei/k12-math`.

@@ -23,6 +23,7 @@ TASK_ID = "quadratic-function-axis"
 STRATEGY_ID = "axis-by-completing-square"
 SAFE_EXPRESSION = re.compile(r"^[0-9xX+\-*/().\s]+$")
 TEMPLATE_PATH = Path(__file__).with_name("templates") / "result.html"
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 @dataclass
@@ -593,7 +594,7 @@ def main() -> None:
     parser.add_argument("--url", default="http://localhost:7474/db/math/tx/commit")
     parser.add_argument(
         "--output",
-        default=str(Path(__file__).with_name("result.html")),
+        default=str(PROJECT_ROOT / "result.html"),
         help="输出的 HTML 文件",
     )
     parser.add_argument("--no-open", action="store_true", help="生成后不自动打开浏览器")

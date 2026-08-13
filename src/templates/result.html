@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{title}}</title>
+    <style>
+      body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 18px/1.7 system-ui, sans-serif; }
+      section { margin: 28px 0; }
+      .formula { margin: 10px 0;}
+      .description { color: #555; }
+      .strategy { margin-top: 36px; }
+      .nested { margin-left: 24px; }
+      .question { padding: 14px 16px; background: #f5f6f7; border-left: 4px solid #555; white-space: pre-wrap; }
+      .recognized-tasks { padding-left: 28px; }
+      .item-count { color: #555; }
+      .problem-item { margin-top: 38px; padding-top: 12px; border-top: 2px solid #999; }
+      .task-result { padding-top: 18px; border-top: 1px solid #ddd; }
+      .unsupported, .failed { display: inline-block; padding: 8px 12px; font-weight: 700; }
+      .unsupported { color: #8a4b00; background: #fff4df; }
+      .failed { color: #b00020; background: #fdecef; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  </head>
+  <body>
+    {{content}}
+  </body>
+</html>
