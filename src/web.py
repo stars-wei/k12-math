@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
+from dotenv import load_dotenv
+
 from deepseek_client import DeepSeekClient
 from errors import friendly_message
 from multi_solver import ProblemItemOutcome, render_problem_items, solve_all_tasks
@@ -22,6 +24,7 @@ from problem import Problem
 
 INPUT_TEMPLATE = Path(__file__).with_name("templates") / "input.html"
 CONFIRM_TEMPLATE = Path(__file__).with_name("templates") / "confirm.html"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
@@ -144,6 +147,7 @@ def make_handler(password: str, url: str):
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description="本地数学解题网页")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
