@@ -135,6 +135,5 @@ class MultiTaskTests(unittest.TestCase):
         self.assertEqual(solve_task_mock.call_count, 1)
         self.assertIn("复用", render_all_results(problem, outcomes))
 
-
 if __name__ == "__main__":
     unittest.main()

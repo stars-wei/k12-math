@@ -7,12 +7,19 @@
     <style>
       body { max-width: 760px; margin: 48px auto; padding: 0 20px; color: #202124; font: 18px/1.7 system-ui, sans-serif; }
       h1 { font-size: 1.7em; } h2 { margin-top: 1.5em; font-size: 1.25em; } h3 { margin-top: 1.3em; font-size: 1.1em; }
-      section { margin: 28px 0; } .formula { margin: 12px 0; overflow-x: auto; }
+      section { margin: 28px 0; }
+      .formula { margin: 12px 0; overflow-x: auto; }
       .description, .reused { color: #555; } .answer { font-weight: 600; }
-      .unsupported { color: #8a5a00; } .failed { color: #b00020; }
-      .question { padding: 14px; border-left: 3px solid #777; background: #f6f7f8; white-space: pre-wrap; }
-      .problem-item { border-top: 1px solid #ddd; padding-top: 18px; }
+      .strategy { margin-top: 36px; }
       .nested { margin-left: 20px; }
+      .question { padding: 14px 16px; border-left: 4px solid #555; background: #f6f7f8; white-space: pre-wrap; }
+      .recognized-tasks { padding-left: 28px; }
+      .item-count { color: #555; }
+      .problem-item { margin-top: 38px; padding-top: 18px; border-top: 2px solid #999; }
+      .task-result { padding-top: 18px; border-top: 1px solid #ddd; }
+      .unsupported, .failed { display: inline-block; padding: 8px 12px; font-weight: 700; }
+      .unsupported { color: #8a5a00; background: #fff4df; }
+      .failed { color: #b00020; background: #fdecef; }
     </style>
     <script>
       window.MathJax = { tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] } };
