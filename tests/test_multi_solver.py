@@ -133,7 +133,45 @@ class MultiTaskTests(unittest.TestCase):
         outcomes = solve_all_tasks(problem, "password", "url", client=None)  # type: ignore[arg-type]
         self.assertEqual([outcome.status for outcome in outcomes], ["solved", "reused"])
         self.assertEqual(solve_task_mock.call_count, 1)
-        self.assertIn("复用", render_all_results(problem, outcomes))
+        page = render_all_results(problem, outcomes)
+        self.assertIn("完整求解过程", page)
+        self.assertIn("答案汇总", page)
+        self.assertNotIn("复用", page)
+        self.assertLess(page.index("完整求解过程"), page.index("答案汇总"))
+
+    def test_calculation_precedes_axis_and_extremum_summary(self) -> None:
+        problem = Problem("求函数的对称轴和最值", "x**2 - 4*x + 3")
+        extremum_solution = Solution(
+            "quadratic-function-extremum",
+            "求最值",
+            "配方法",
+            None,
+            [],
+            Answer("求最值", "当 x = 2 时取得最小值 -1", r"x=2,\ y_{\min}=-1"),
+            {"axis": 2, "extremum_kind": "最小值", "extremum_value": -1},
+        )
+        outcomes = [
+            TaskOutcome(
+                TaskIntent("quadratic-function-axis", "求对称轴", "对称轴"),
+                "reused",
+                answer=Answer("求对称轴", "对称轴为 x = 2", "x=2", "对称轴为"),
+            ),
+            TaskOutcome(
+                TaskIntent("quadratic-function-extremum", "求最值", "最值"),
+                "solved",
+                solution=extremum_solution,
+            ),
+        ]
+
+        page = render_all_results(problem, outcomes)
+        calculation_position = page.index("完整求解过程")
+        summary_position = page.index("答案汇总")
+        axis_answer_position = page.index("对称轴为")
+        extremum_answer_position = page.index(r"y_{\min}=-1")
+        self.assertLess(calculation_position, summary_position)
+        self.assertLess(summary_position, axis_answer_position)
+        self.assertLess(summary_position, extremum_answer_position)
+        self.assertEqual(page.count("答案汇总"), 1)
 
 if __name__ == "__main__":
     unittest.main()
