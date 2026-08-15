@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import sympy as sp
+from dotenv import load_dotenv
 
 from errors import ExecutionError, GraphServiceError
 from operation_registry import OperationRegistry
@@ -546,7 +547,11 @@ def render_answer(answer: Answer) -> str:
     return "\n".join(["<h2>最终答案</h2>", f'<p class="answer">{formula}</p>'])
 
 
-def render_solution_content(solution: Solution, heading_level: int = 1) -> str:
+def render_solution_content(
+    solution: Solution,
+    heading_level: int = 1,
+    include_answer: bool = True,
+) -> str:
     """Render one verified task result without the surrounding HTML document."""
     expression = solution.expression
     strategy_name = solution.strategy_name
@@ -579,7 +584,8 @@ def render_solution_content(solution: Solution, heading_level: int = 1) -> str:
                 "</section>",
             ]
         )
-    parts.append(render_answer(answer))
+    if include_answer:
+        parts.append(render_answer(answer))
     return "\n".join(parts)
 
 
@@ -627,6 +633,7 @@ def solve_expression(
 
 
 def main() -> None:
+    load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description="Neo4j + SymPy：执行图谱定义的一元二次函数策略")
     parser.add_argument("--expression", required=True, help='例如 "x**2/2 - 5*x + 1"')
     parser.add_argument("--task", default=TASK_ID, help="Neo4j Task ID")

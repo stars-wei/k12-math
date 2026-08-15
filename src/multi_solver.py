@@ -13,7 +13,6 @@ from solve import (
     Answer,
     Solution,
     build_answer,
-    render_answer,
     render_solution_content,
     solve_task,
     wrap_html,
@@ -222,28 +221,40 @@ def render_all_results(problem: Problem, outcomes: list[TaskOutcome]) -> str:
     )
 
 
-def render_outcome(outcome: TaskOutcome, heading_level: int) -> str:
-    if outcome.status == "solved" and outcome.solution is not None:
-        return render_solution_content(outcome.solution, heading_level=heading_level)
-    if outcome.status == "reused" and outcome.answer is not None:
-        heading = f"h{heading_level}"
-        return (
-            f"<{heading}>{html.escape(outcome.answer.title)}</{heading}>"
-            f'<p class="reused">{html.escape(outcome.detail)}</p>'
-            f"{render_answer(outcome.answer)}"
-        )
+def render_answer_formula(answer: Answer) -> str:
+    """Render one concise answer for an item-level summary."""
+    prefix = f"{html.escape(answer.prefix)} " if answer.prefix else ""
+    return f'{prefix}\\({answer.latex}\\)'
+
+
+def render_answer_summary(outcomes: list[TaskOutcome], heading_level: int) -> str:
+    """Summarize every requested result after all calculations have been shown."""
     heading = f"h{heading_level}"
-    if outcome.status == "not_registered":
-        detail = outcome.detail or "知识图谱中尚没有该题型的可执行策略，本次未输出这部分答案。"
-        return (
-            f"<{heading}>{html.escape(outcome.intent.name)}</{heading}>"
-            f'<p class="unsupported">{html.escape(detail)}</p>'
+    parts = [f"<{heading}>答案汇总</{heading}>", '<ol class="answer-summary">']
+    for outcome in outcomes:
+        answer = (
+            outcome.solution.answer
+            if outcome.status == "solved" and outcome.solution is not None
+            else outcome.answer
         )
-    return (
-        f"<{heading}>{html.escape(outcome.intent.name)}</{heading}>"
-        '<p class="failed">题型已识别，但执行失败</p>'
-        f'<p class="description">{html.escape(outcome.detail)}</p>'
-    )
+        parts.append("<li>")
+        if answer is not None:
+            parts.append(f"<strong>{html.escape(answer.title)}</strong>")
+            parts.append(f'<p class="answer">{render_answer_formula(answer)}</p>')
+        elif outcome.status == "not_registered":
+            detail = outcome.detail or (
+                "知识图谱中尚没有该题型的可执行策略，本次未输出这部分答案。"
+            )
+            parts.append(f"<strong>{html.escape(outcome.intent.name)}</strong>")
+            parts.append(f'<p class="unsupported">{html.escape(detail)}</p>')
+        else:
+            parts.append(f"<strong>{html.escape(outcome.intent.name)}</strong>")
+            parts.append('<p class="failed">题型已识别，但执行失败</p>')
+            if outcome.detail:
+                parts.append(f'<p class="description">{html.escape(outcome.detail)}</p>')
+        parts.append("</li>")
+    parts.append("</ol>")
+    return "\n".join(parts)
 
 
 def render_problem_items(question: str, items: list[ProblemItemOutcome]) -> str:
@@ -272,11 +283,28 @@ def render_problem_items(question: str, items: list[ProblemItemOutcome]) -> str:
         parts.append(f'<section class="problem-item" id="item-{item_index}">')
         if label:
             parts.append(f"<h2>{html.escape(label)}</h2>")
-        for task_index, outcome in enumerate(item.outcomes, start=1):
+        section_heading_level = 3 if label else 2
+        solved_outcomes = [
+            outcome
+            for outcome in item.outcomes
+            if outcome.status == "solved" and outcome.solution is not None
+        ]
+        if solved_outcomes:
+            heading = f"h{section_heading_level}"
+            parts.append(f"<{heading}>完整求解过程</{heading}>")
+        for calculation_index, outcome in enumerate(solved_outcomes, start=1):
             parts.append(
-                f'<section class="task-result" id="item-{item_index}-task-{task_index}">'
+                f'<section class="calculation" '
+                f'id="item-{item_index}-calculation-{calculation_index}">'
             )
-            parts.append(render_outcome(outcome, heading_level=3 if label else 2))
+            parts.append(
+                render_solution_content(
+                    outcome.solution,
+                    heading_level=section_heading_level + 1,
+                    include_answer=False,
+                )
+            )
             parts.append("</section>")
+        parts.append(render_answer_summary(item.outcomes, section_heading_level))
         parts.append("</section>")
     return wrap_html("\n".join(parts), "题目分析与求解")

@@ -13,13 +13,23 @@ python -m pip install -r requirements.txt
 python src/solve.py --expression "x**2/2 - 5*x + 1"
 ```
 
-程序会提示输入 Neo4j 密码，生成 `result.html` 并自动在浏览器打开。页面使用 MathJax 在线渲染 LaTeX 公式。默认连接本机 Docker 容器暴露的 HTTP 地址：`http://localhost:7474/db/math/tx/commit`。
+程序从项目根目录的 `.env` 读取 Neo4j 密码；未配置时会提示输入。随后生成 `result.html` 并自动在浏览器打开。页面使用 MathJax 在线渲染 LaTeX 公式。默认连接本机 Docker 容器暴露的 HTTP 地址：`http://localhost:7474/db/math/tx/commit`。
 
-也可以先在终端设置密码，避免每次输入：
+首次使用时复制环境变量示例文件：
 
 ```powershell
-$env:NEO4J_PASSWORD = '你的 Neo4j 密码'
+Copy-Item .env.example .env
 ```
+
+然后在 `.env` 中填写本地凭据：
+
+```dotenv
+NEO4J_PASSWORD="你的 Neo4j 密码"
+DEEPSEEK_API_KEY="你的 DeepSeek API Key"
+SILICONFLOW_API_KEY="你的 SiliconFlow API Key"
+```
+
+`.env` 已被 Git 忽略，不要将真实密码或 API Key 写入 `.env.example`。
 
 指定输出文件或不自动打开浏览器：
 
@@ -84,12 +94,7 @@ python src/web.py
 
 输入 Neo4j 密码后，打开 `http://127.0.0.1:8000`。网页可输入完整题干，也可上传 PNG/JPEG/WEBP 题目图片（最大 10 MB）。图片会先由 SiliconFlow 的 DeepSeek-OCR 转写，用户确认或修改题干后，DeepSeek 再提取 SymPy 表达式，并从 Neo4j 返回的候选 Task 与可执行 Strategy 中选择；选择结果和表达式都会由图谱与 SymPy 校验。
 
-启动网页前，设置 DeepSeek 密钥：
-
-```powershell
-$env:DEEPSEEK_API_KEY = '你的 DeepSeek API Key'
-$env:SILICONFLOW_API_KEY = '你的 SiliconFlow API Key'
-```
+启动网页前，请确认 `.env` 已填写 `DEEPSEEK_API_KEY`；只有使用截图识别时才需要 `SILICONFLOW_API_KEY`。
 
 可输入的完整题干例如：
 
