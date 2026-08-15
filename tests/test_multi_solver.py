@@ -66,9 +66,35 @@ class MultiTaskTests(unittest.TestCase):
                 ProblemItemOutcome("（2）", item2, [TaskOutcome(intent, "not_registered")]),
             ],
         )
-        self.assertIn("识别出 2 个待求函数", page)
+        self.assertIn("识别出 2 个待求项", page)
         self.assertIn("（1）", page)
         self.assertIn("（2）", page)
+
+    def test_each_item_detects_only_its_own_tasks(self) -> None:
+        item1 = Problem(
+            COMPOUND_QUESTION,
+            "-x**2/2+4*x+2",
+            item_question_text="指出它的图像经过怎样的变换得到",
+            reference_expressions=("-x**2/2",),
+        )
+        item2 = Problem(
+            COMPOUND_QUESTION,
+            "-x**2/2+4*x+2",
+            item_question_text="指出对称轴，试述函数值的变化趋势及最大值或最小值",
+        )
+
+        self.assertEqual(
+            [intent.id for intent in detect_task_intents(item1.task_text)],
+            ["quadratic-function-transformation"],
+        )
+        self.assertEqual(
+            [intent.id for intent in detect_task_intents(item2.task_text)],
+            [
+                "quadratic-function-axis",
+                "quadratic-function-monotonicity",
+                "quadratic-function-extremum",
+            ],
+        )
 
     def test_vertex_is_detected(self) -> None:
         intents = detect_task_intents("求函数的顶点坐标和对称轴")

@@ -107,7 +107,7 @@ def select_strategy(
     candidates = load_executable_strategies(url, password, task.id)
     if not candidates:
         return None
-    requested = match_requested_strategy(problem.question_text, candidates)
+    requested = match_requested_strategy(problem.task_text, candidates)
     if requested is not None:
         return requested
     if len(candidates) == 1:
@@ -137,7 +137,7 @@ def solve_all_tasks(
     url: str,
     client: DeepSeekClient,
 ) -> list[TaskOutcome]:
-    intents = detect_task_intents(problem.question_text)
+    intents = detect_task_intents(problem.task_text)
     if not intents:
         return [
             TaskOutcome(
@@ -247,16 +247,22 @@ def render_outcome(outcome: TaskOutcome, heading_level: int) -> str:
 
 
 def render_problem_items(question: str, items: list[ProblemItemOutcome]) -> str:
-    """Render one or more function items under their shared task requirements."""
-    first_outcomes = items[0].outcomes if items else []
+    """Render one or more requested items under their shared source question."""
+    recognized_outcomes: list[TaskOutcome] = []
+    seen_intents: set[str] = set()
+    for item in items:
+        for outcome in item.outcomes:
+            if outcome.intent.id not in seen_intents:
+                seen_intents.add(outcome.intent.id)
+                recognized_outcomes.append(outcome)
     recognized = "".join(
         f'<li><strong>{html.escape(outcome.intent.name)}</strong></li>'
-        for outcome in first_outcomes
+        for outcome in recognized_outcomes
     )
     parts = [
         "<h1>题目分析与求解</h1>",
         f'<p class="question">{html.escape(question)}</p>',
-        f'<p class="item-count">识别出 {len(items)} 个待求函数</p>',
+        f'<p class="item-count">识别出 {len(items)} 个待求项</p>',
         "<h2>识别出的题型</h2>",
         f'<ol class="recognized-tasks">{recognized}</ol>',
     ]

@@ -95,7 +95,7 @@ def match_task_from_question(
     candidates: list[Candidate],
 ) -> Candidate | None:
     """Resolve an explicit task request locally; leave ambiguous text to the model."""
-    text = problem.question_text.replace(" ", "")
+    text = problem.task_text.replace(" ", "")
     matched_ids = {
         task_id
         for task_id, keywords in TASK_KEYWORDS.items()

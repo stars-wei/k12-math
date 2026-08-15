@@ -40,8 +40,13 @@ def confirm_page(question: str) -> str:
 
 
 def build_problem(question: str, extracted: dict) -> Problem:
-    """Preserve confirmed text and attach only the model-extracted expression."""
-    return Problem(question, extracted["expression_sympy"])
+    """Preserve the source question and attach one validated extracted item."""
+    return Problem(
+        question_text=question,
+        expression_sympy=extracted["target_expression"],
+        item_question_text=extracted["question_text"],
+        reference_expressions=tuple(extracted["reference_expressions"]),
+    )
 
 
 def normalize_item_label(label: object, index: int, total: int) -> str:
