@@ -1,6 +1,6 @@
 # k12-math
 
-最小可行版本：从 Neo4j `math` 图谱读取 Task、Strategy 和 Operation，使用注册过的 SymPy 操作执行策略路径，并输出经过验证的解题步骤。
+一个图谱驱动、可解释的 K12 数学求解原型：从 Neo4j `math` 图谱读取 Task、Strategy 和 Operation，使用注册过的 SymPy 操作执行策略路径，并输出经过验证的解题步骤。
 
 `src/templates/result.html` 是页面源模板；每次求解生成的 `result.html` 是浏览器打开的结果文件。
 
@@ -27,9 +27,10 @@ $env:NEO4J_PASSWORD = '你的 Neo4j 密码'
 python src/solve.py --expression "x**2/2 - 5*x + 1" --output answer.html --no-open
 ```
 
-当前支持两个 Task：
+当前支持三个可执行 Task：
 
 - `quadratic-function-axis`：求一元二次函数图像的对称轴。
+- `quadratic-function-vertex`：求一元二次函数图像的顶点。
 - `quadratic-function-extremum`：求一元二次函数的最大值或最小值。
 
 使用配方法求最值：
@@ -45,16 +46,21 @@ python src/solve.py `
 
 ## 复合题目
 
-网页会先识别题目中的全部题型，再逐项检查 Neo4j 中是否存在完整的可执行策略。一个题目可以同时包含多个要求；已入库的题型会执行策略，未找到可执行策略的题型会显示“该题型未入库”，不会影响其他题型继续求解。
+网页会先识别题目中的全部题型，再逐项检查 Neo4j 中是否存在完整的可执行策略。一个题目可以同时包含多个要求；已入库的题型会执行策略，未找到可执行策略的题型会明确说明“本次未输出这部分答案”，不会影响其他题型继续求解。相同函数的顶点、对称轴和最值会复用已验证的中间事实，避免重复计算。
 
 当前识别目录包括：
 
 - 一元二次函数图像变换：可识别，尚未入库。
+- 一元二次函数图像的顶点：可识别、可执行。
 - 一元二次函数图像的对称轴：可识别、可执行。
 - 一元二次函数变化趋势：可识别，尚未入库。
 - 一元二次函数最大值或最小值：可识别、可执行。
 
 题型识别目录与执行能力库相互独立。识别出题型并不代表系统已经具备该题型的 Strategy 和 Operation。
+
+## 图谱迁移
+
+首次使用 v0.2 时，在 Neo4j Browser 中执行 [`graph/migrations/v0.2_vertex_task.cypher`](graph/migrations/v0.2_vertex_task.cypher)。该迁移会新增“求顶点”的 Task 与策略路径，并为操作说明补充可由 MathJax 渲染的行内公式。
 
 ## 多函数题目
 

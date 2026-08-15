@@ -6,7 +6,17 @@ import unittest
 
 import sympy as sp
 
-from solve import Operation, build_answer, equation_latex, execute, parse_quadratic
+from solve import (
+    Answer,
+    Operation,
+    Solution,
+    Step,
+    build_answer,
+    equation_latex,
+    execute,
+    parse_quadratic,
+    render_solution_content,
+)
 
 
 def operation(
@@ -41,7 +51,13 @@ class QuadraticSolverTests(unittest.TestCase):
         state = self.execute_expression("x**2/2 - 5*x + 1")
         answer = build_answer("quadratic-function-axis", "求对称轴", state)
         self.assertEqual(state["axis"], sp.Integer(5))
-        self.assertEqual(answer.text, "x = 5")
+        self.assertEqual(answer.text, "对称轴为 x = 5。")
+
+    def test_vertex_answer_is_semantic(self) -> None:
+        state = self.execute_expression("x**2 - 4*x + 3")
+        answer = build_answer("quadratic-function-vertex", "求顶点", state)
+        self.assertEqual(answer.text, "顶点为 (2, -1)。")
+        self.assertEqual(answer.latex, r"\left(2,\,-1\right)")
 
     def test_axis_formula(self) -> None:
         x, expression, a, b, c = parse_quadratic("x**2/2 - 5*x + 1")
@@ -85,6 +101,20 @@ class QuadraticSolverTests(unittest.TestCase):
         self.assertEqual(state["axis"], sp.Integer(-1))
         self.assertEqual(state["extremum_value"], sp.Integer(-4))
         self.assertEqual(state["extremum_kind"], "最小值")
+
+    def test_operation_description_keeps_inline_mathjax(self) -> None:
+        x = sp.symbols("x")
+        step = Step(
+            "1", "公式", "", r"使用 \(x=-\frac{b}{2a}\) 求对称轴。",
+            "", "", "y=x^2", "x=0", (),
+        )
+        solution = Solution(
+            "quadratic-function-axis", "求对称轴", "公式法", x**2, [step],
+            Answer("求对称轴", "对称轴为 x = 0。", "x=0", "对称轴为"), {},
+        )
+        page = render_solution_content(solution)
+        self.assertIn(r"\(x=-\frac{b}{2a}\)", page)
+        self.assertEqual(page.count("对称轴为"), 1)
 
 
 if __name__ == "__main__":
