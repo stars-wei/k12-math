@@ -10,6 +10,7 @@ from solve import OPERATIONS, load_operations, query_neo4j
 
 
 TASK_KEYWORDS = {
+    "quadratic-function-vertex": ("顶点", "顶点坐标"),
     "quadratic-function-axis": ("对称轴",),
     "quadratic-function-extremum": ("最值", "最大值", "最小值", "极值", "极大值", "极小值"),
 }
@@ -94,7 +95,7 @@ def match_task_from_question(
     candidates: list[Candidate],
 ) -> Candidate | None:
     """Resolve an explicit task request locally; leave ambiguous text to the model."""
-    text = problem.question_text.replace(" ", "")
+    text = problem.task_text.replace(" ", "")
     matched_ids = {
         task_id
         for task_id, keywords in TASK_KEYWORDS.items()

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from deepseek_client import DeepSeekClient
+from errors import friendly_message
 from multi_solver import ProblemItemOutcome, render_problem_items, solve_all_tasks
 from ocr_client import OcrClient
 from problem import Problem
@@ -39,8 +40,13 @@ def confirm_page(question: str) -> str:
 
 
 def build_problem(question: str, extracted: dict) -> Problem:
-    """Preserve confirmed text and attach only the model-extracted expression."""
-    return Problem(question, extracted["expression_sympy"])
+    """Preserve the source question and attach one validated extracted item."""
+    return Problem(
+        question_text=question,
+        expression_sympy=extracted["target_expression"],
+        item_question_text=extracted["question_text"],
+        reference_expressions=tuple(extracted["reference_expressions"]),
+    )
 
 
 def normalize_item_label(label: object, index: int, total: int) -> str:
@@ -76,7 +82,12 @@ def make_handler(password: str, url: str):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except BrokenPipeError:
+                # The learner closed or refreshed the page before the response.
+                # This is normal for a local development server.
+                return
 
         def do_GET(self) -> None:  # noqa: N802
             if self.path != "/":
@@ -124,7 +135,7 @@ def make_handler(password: str, url: str):
                     item_results.append(ProblemItemOutcome(label, problem, outcomes))
                 self.send_html(render_problem_items(question, item_results))
             except Exception as error:
-                self.send_html(input_page(question, str(error)), status=400)
+                self.send_html(input_page(question, friendly_message(error)), status=400)
 
         def log_message(self, format: str, *args: object) -> None:
             print(format % args)

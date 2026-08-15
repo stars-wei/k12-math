@@ -12,10 +12,12 @@ import webbrowser
 from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import sympy as sp
 
+from errors import ExecutionError, GraphServiceError
 from operation_registry import OperationRegistry
 
 
@@ -55,6 +57,7 @@ class Answer:
     title: str
     text: str
     latex: str
+    prefix: str = ""
 
 
 @dataclass
@@ -65,6 +68,7 @@ class Solution:
     expression: sp.Expr
     steps: list[Step]
     answer: Answer
+    facts: dict[str, object]
 
 
 def query_neo4j(url: str, password: str, cypher: str, parameters: dict) -> list[dict]:
@@ -77,10 +81,15 @@ def query_neo4j(url: str, password: str, cypher: str, parameters: dict) -> list[
         headers={"Content-Type": "application/json", "Authorization": f"Basic {token}"},
         method="POST",
     )
-    with urlopen(request, timeout=10) as response:
-        payload = json.load(response)
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.load(response)
+    except HTTPError as error:
+        raise GraphServiceError(f"知识图谱服务请求失败（HTTP {error.code}）。") from error
+    except URLError as error:
+        raise GraphServiceError("无法连接知识图谱服务，请确认 Neo4j 容器正在运行。") from error
     if payload["errors"]:
-        raise RuntimeError(payload["errors"])
+        raise GraphServiceError("知识图谱查询未被接受，请检查图谱配置。")
     result = payload["results"][0]
     return [dict(zip(result["columns"], item["row"])) for item in result["data"]]
 
@@ -484,7 +493,25 @@ def build_answer(task_id: str, task_name: str, state: dict) -> Answer:
         if "axis" not in state:
             raise LookupError("策略路径没有产生对称轴")
         axis = state["axis"]
-        return Answer(task_name, f"x = {sp.sstr(axis)}", rf"x={sp.latex(axis)}")
+        return Answer(
+            task_name,
+            f"对称轴为 x = {sp.sstr(axis)}。",
+            rf"x={sp.latex(axis)}",
+            "对称轴为",
+        )
+
+    if task_id == "quadratic-function-vertex":
+        required = {"axis", "vertex_value"}
+        if not required.issubset(state):
+            raise LookupError("策略路径没有产生完整的顶点信息")
+        axis = state["axis"]
+        value = state["vertex_value"]
+        return Answer(
+            task_name,
+            f"顶点为 ({sp.sstr(axis)}, {sp.sstr(value)})。",
+            rf"\left({sp.latex(axis)},\,{sp.latex(value)}\right)",
+            "顶点为",
+        )
 
     if task_id == "quadratic-function-extremum":
         required = {"axis", "extremum_kind", "extremum_value"}
@@ -498,9 +525,25 @@ def build_answer(task_id: str, task_name: str, state: dict) -> Answer:
             rf"\text{{当 }}x={sp.latex(axis)}\text{{ 时，函数取得{kind} }}"
             rf"{sp.latex(value)}"
         )
-        return Answer(task_name, text, latex)
+        return Answer(task_name, text, latex, "")
 
     raise LookupError(f"尚未实现 Task 的答案生成器：{task_id}")
+
+
+def collect_facts(state: dict) -> dict[str, object]:
+    """Expose only verified reusable results, never the mutable execution state."""
+    fact_names = ("axis", "vertex_value", "extremum_kind", "extremum_value")
+    return {name: state[name] for name in fact_names if name in state}
+
+
+def render_answer(answer: Answer) -> str:
+    """Render one concise semantic answer without repeating it as display math."""
+    formula = (
+        f'{html.escape(answer.prefix)} \\({answer.latex}\\)'
+        if answer.prefix
+        else f'\\({answer.latex}\\)'
+    )
+    return "\n".join(["<h2>最终答案</h2>", f'<p class="answer">{formula}</p>'])
 
 
 def render_solution_content(solution: Solution, heading_level: int = 1) -> str:
@@ -536,13 +579,7 @@ def render_solution_content(solution: Solution, heading_level: int = 1) -> str:
                 "</section>",
             ]
         )
-    parts.extend(
-        [
-            "<h2>最终答案</h2>",
-            f"<p>{html.escape(answer.text)}</p>",
-            f"<div class=\"formula\">\\({answer.latex}\\)</div>",
-        ]
-    )
+    parts.append(render_answer(answer))
     return "\n".join(parts)
 
 
@@ -570,9 +607,12 @@ def solve_task(
     task_name, strategy_name = check_strategy(url, password, task_id, strategy)
     operations = load_operations(url, password, strategy)
     x, expression, a, b, c = parse_quadratic(expression_text)
-    steps, state = execute(operations, expression, x, a, b, c)
-    answer = build_answer(task_id, task_name, state)
-    return Solution(task_id, task_name, strategy_name, expression, steps, answer)
+    try:
+        steps, state = execute(operations, expression, x, a, b, c)
+        answer = build_answer(task_id, task_name, state)
+    except (ArithmeticError, LookupError, ValueError) as error:
+        raise ExecutionError(f"策略执行失败：{error}") from error
+    return Solution(task_id, task_name, strategy_name, expression, steps, answer, collect_facts(state))
 
 
 def solve_expression(

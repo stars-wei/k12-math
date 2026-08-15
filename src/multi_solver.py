@@ -9,7 +9,15 @@ from dataclasses import dataclass
 from classifier import load_executable_strategies, load_task_candidates, select_candidate
 from deepseek_client import DeepSeekClient
 from problem import Candidate, Problem
-from solve import Solution, render_solution_content, solve_task, wrap_html
+from solve import (
+    Answer,
+    Solution,
+    build_answer,
+    render_answer,
+    render_solution_content,
+    solve_task,
+    wrap_html,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,7 @@ class TaskOutcome:
     intent: TaskIntent
     status: str
     solution: Solution | None = None
+    answer: Answer | None = None
     detail: str = ""
 
 
@@ -46,6 +55,11 @@ TASK_CATALOG = (
         "quadratic-function-transformation",
         "判断一元二次函数图像的变换",
         (r"图像.{0,12}(?:怎样|如何|什么样的)?变换", r"平移", r"伸缩"),
+    ),
+    TaskSpec(
+        "quadratic-function-vertex",
+        "求一元二次函数图像的顶点",
+        (r"顶点(?:坐标)?",),
     ),
     TaskSpec(
         "quadratic-function-axis",
@@ -93,7 +107,7 @@ def select_strategy(
     candidates = load_executable_strategies(url, password, task.id)
     if not candidates:
         return None
-    requested = match_requested_strategy(problem.question_text, candidates)
+    requested = match_requested_strategy(problem.task_text, candidates)
     if requested is not None:
         return requested
     if len(candidates) == 1:
@@ -123,7 +137,7 @@ def solve_all_tasks(
     url: str,
     client: DeepSeekClient,
 ) -> list[TaskOutcome]:
-    intents = detect_task_intents(problem.question_text)
+    intents = detect_task_intents(problem.task_text)
     if not intents:
         return [
             TaskOutcome(
@@ -134,16 +148,53 @@ def solve_all_tasks(
         ]
 
     graph_tasks = {task.id: task for task in load_task_candidates(url, password)}
-    outcomes: list[TaskOutcome] = []
-    for intent in intents:
+    outcomes_by_position: dict[int, TaskOutcome] = {}
+    facts: dict[str, object] = {}
+    fact_sources: dict[str, str] = {}
+    priority = {
+        "quadratic-function-extremum": 0,
+        "quadratic-function-vertex": 1,
+        "quadratic-function-axis": 2,
+    }
+    execution_order = sorted(
+        enumerate(intents), key=lambda item: (priority.get(item[1].id, 3), item[0])
+    )
+    for position, intent in execution_order:
         graph_task = graph_tasks.get(intent.id)
         if graph_task is None:
-            outcomes.append(TaskOutcome(intent, "not_registered"))
+            outcomes_by_position[position] = TaskOutcome(
+                intent,
+                "not_registered",
+                detail="知识图谱中尚没有该题型的可执行策略，本次未输出这部分答案。",
+            )
+            continue
+
+        try:
+            answer = build_answer(graph_task.id, graph_task.name, facts)
+        except LookupError:
+            answer = None
+        if answer is not None:
+            source_names = {
+                fact_sources[name]
+                for name in ("axis", "vertex_value", "extremum_kind", "extremum_value")
+                if name in facts and name in fact_sources
+            }
+            source = "、".join(sorted(source_names)) or "前序计算"
+            outcomes_by_position[position] = TaskOutcome(
+                intent,
+                "reused",
+                answer=answer,
+                detail=f"复用“{source}”已验证的中间结果。",
+            )
             continue
 
         strategy = select_strategy(problem, graph_task, password, url, client)
         if strategy is None:
-            outcomes.append(TaskOutcome(intent, "not_registered"))
+            outcomes_by_position[position] = TaskOutcome(
+                intent,
+                "not_registered",
+                detail="知识图谱中尚没有该题型的可执行策略，本次未输出这部分答案。",
+            )
             continue
 
         try:
@@ -155,10 +206,13 @@ def solve_all_tasks(
                 url,
             )
         except Exception as error:
-            outcomes.append(TaskOutcome(intent, "failed", detail=str(error)))
+            outcomes_by_position[position] = TaskOutcome(intent, "failed", detail=str(error))
         else:
-            outcomes.append(TaskOutcome(intent, "solved", solution=solution))
-    return outcomes
+            facts.update(solution.facts)
+            for fact_name in solution.facts:
+                fact_sources.setdefault(fact_name, graph_task.name)
+            outcomes_by_position[position] = TaskOutcome(intent, "solved", solution=solution)
+    return [outcomes_by_position[index] for index in range(len(intents))]
 
 
 def render_all_results(problem: Problem, outcomes: list[TaskOutcome]) -> str:
@@ -171,11 +225,19 @@ def render_all_results(problem: Problem, outcomes: list[TaskOutcome]) -> str:
 def render_outcome(outcome: TaskOutcome, heading_level: int) -> str:
     if outcome.status == "solved" and outcome.solution is not None:
         return render_solution_content(outcome.solution, heading_level=heading_level)
+    if outcome.status == "reused" and outcome.answer is not None:
+        heading = f"h{heading_level}"
+        return (
+            f"<{heading}>{html.escape(outcome.answer.title)}</{heading}>"
+            f'<p class="reused">{html.escape(outcome.detail)}</p>'
+            f"{render_answer(outcome.answer)}"
+        )
     heading = f"h{heading_level}"
     if outcome.status == "not_registered":
+        detail = outcome.detail or "知识图谱中尚没有该题型的可执行策略，本次未输出这部分答案。"
         return (
             f"<{heading}>{html.escape(outcome.intent.name)}</{heading}>"
-            '<p class="unsupported">该题型未入库</p>'
+            f'<p class="unsupported">{html.escape(detail)}</p>'
         )
     return (
         f"<{heading}>{html.escape(outcome.intent.name)}</{heading}>"
@@ -185,16 +247,22 @@ def render_outcome(outcome: TaskOutcome, heading_level: int) -> str:
 
 
 def render_problem_items(question: str, items: list[ProblemItemOutcome]) -> str:
-    """Render one or more function items under their shared task requirements."""
-    first_outcomes = items[0].outcomes if items else []
+    """Render one or more requested items under their shared source question."""
+    recognized_outcomes: list[TaskOutcome] = []
+    seen_intents: set[str] = set()
+    for item in items:
+        for outcome in item.outcomes:
+            if outcome.intent.id not in seen_intents:
+                seen_intents.add(outcome.intent.id)
+                recognized_outcomes.append(outcome)
     recognized = "".join(
         f'<li><strong>{html.escape(outcome.intent.name)}</strong></li>'
-        for outcome in first_outcomes
+        for outcome in recognized_outcomes
     )
     parts = [
         "<h1>题目分析与求解</h1>",
         f'<p class="question">{html.escape(question)}</p>',
-        f'<p class="item-count">识别出 {len(items)} 个待求函数</p>',
+        f'<p class="item-count">识别出 {len(items)} 个待求项</p>',
         "<h2>识别出的题型</h2>",
         f'<ol class="recognized-tasks">{recognized}</ol>',
     ]

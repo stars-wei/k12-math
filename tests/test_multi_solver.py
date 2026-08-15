@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from multi_solver import (
     ProblemItemOutcome,
@@ -13,7 +14,8 @@ from multi_solver import (
     render_all_results,
     render_problem_items,
 )
-from problem import Problem
+from problem import Candidate, Problem
+from solve import Answer, Solution
 
 
 COMPOUND_QUESTION = """已知一元二次函数 y=-1/2*x^2+4*x+2。
@@ -41,7 +43,7 @@ class MultiTaskTests(unittest.TestCase):
             "not_registered",
         )
         page = render_all_results(problem, [outcome])
-        self.assertIn("该题型未入库", page)
+        self.assertIn("知识图谱中尚没有该题型的可执行策略", page)
 
     def test_explicit_completing_square_strategy_is_honored(self) -> None:
         from problem import Candidate
@@ -64,10 +66,74 @@ class MultiTaskTests(unittest.TestCase):
                 ProblemItemOutcome("（2）", item2, [TaskOutcome(intent, "not_registered")]),
             ],
         )
-        self.assertIn("识别出 2 个待求函数", page)
+        self.assertIn("识别出 2 个待求项", page)
         self.assertIn("（1）", page)
         self.assertIn("（2）", page)
 
+    def test_each_item_detects_only_its_own_tasks(self) -> None:
+        item1 = Problem(
+            COMPOUND_QUESTION,
+            "-x**2/2+4*x+2",
+            item_question_text="指出它的图像经过怎样的变换得到",
+            reference_expressions=("-x**2/2",),
+        )
+        item2 = Problem(
+            COMPOUND_QUESTION,
+            "-x**2/2+4*x+2",
+            item_question_text="指出对称轴，试述函数值的变化趋势及最大值或最小值",
+        )
+
+        self.assertEqual(
+            [intent.id for intent in detect_task_intents(item1.task_text)],
+            ["quadratic-function-transformation"],
+        )
+        self.assertEqual(
+            [intent.id for intent in detect_task_intents(item2.task_text)],
+            [
+                "quadratic-function-axis",
+                "quadratic-function-monotonicity",
+                "quadratic-function-extremum",
+            ],
+        )
+
+    def test_vertex_is_detected(self) -> None:
+        intents = detect_task_intents("求函数的顶点坐标和对称轴")
+        self.assertEqual(
+            [intent.id for intent in intents],
+            ["quadratic-function-vertex", "quadratic-function-axis"],
+        )
+
+    @patch("multi_solver.load_task_candidates")
+    @patch("multi_solver.select_strategy")
+    @patch("multi_solver.solve_task")
+    def test_axis_reuses_vertex_solution(
+        self,
+        solve_task_mock,
+        select_strategy_mock,
+        load_tasks_mock,
+    ) -> None:
+        question = "求函数图像的顶点和对称轴"
+        problem = Problem(question, "x**2 - 4*x + 3")
+        load_tasks_mock.return_value = [
+            Candidate("quadratic-function-vertex", "求顶点", ""),
+            Candidate("quadratic-function-axis", "求对称轴", ""),
+        ]
+        select_strategy_mock.return_value = Candidate("vertex-by-completing-square", "配方法", "")
+        solve_task_mock.return_value = Solution(
+            "quadratic-function-vertex",
+            "求顶点",
+            "配方法",
+            None,
+            [],
+            Answer("求顶点", "顶点为 (2, -1)。", r"\left(2,\,-1\right)"),
+            {"axis": 2, "vertex_value": -1},
+        )
+        from multi_solver import solve_all_tasks
+
+        outcomes = solve_all_tasks(problem, "password", "url", client=None)  # type: ignore[arg-type]
+        self.assertEqual([outcome.status for outcome in outcomes], ["solved", "reused"])
+        self.assertEqual(solve_task_mock.call_count, 1)
+        self.assertIn("复用", render_all_results(problem, outcomes))
 
 if __name__ == "__main__":
     unittest.main()
