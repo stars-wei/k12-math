@@ -394,11 +394,11 @@ python -m unittest discover -s tests -v
 
 **架构版本：** v0.1
 
-**代码仓库：** https://github.com/stars-wei/k12-math
+**代码仓库：** https://github.com/starswei/k12-math
 
 **主分支：** `main`
 
-**主要负责人：** stars-wei / 独立开发者
+**主要负责人：** starswei / 独立开发者
 
 **项目定位：** 基于知识图谱、结果可验证的 K12 数学求解器原型，也是未来“伴学”系统的数学解题模块。
 
