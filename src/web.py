@@ -88,6 +88,10 @@ GRADE_TEMPLATE = Path(__file__).with_name("templates") / "grade.html"
 
 def make_handler(password: str, url: str):
     class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args) -> None:
+            sys.stdout.write(f"[{self.log_date_time_string()}] {self.client_address[0]} - {format % args}\n")
+            sys.stdout.flush()
+
         def send_html(self, page: str, status: int = 200) -> None:
             try:
                 data = page.encode("utf-8")
@@ -96,6 +100,7 @@ def make_handler(password: str, url: str):
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                print(f"📤 [RESPONSE] {self.path} {status} HTML ({len(data)} bytes)", flush=True)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                 return
 
@@ -107,10 +112,12 @@ def make_handler(password: str, url: str):
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                print(f"📤 [RESPONSE] {self.path} {status} JSON ({len(data)} bytes)", flush=True)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                 return
 
         def do_GET(self) -> None:  # noqa: N802
+            print(f"📥 [REQUEST] GET {self.path} (来自 {self.client_address[0]})", flush=True)
             if self.path in {"/ocr_test", "/test"}:
                 self.send_html(OCR_TEST_TEMPLATE.read_text(encoding="utf-8"))
                 return
@@ -123,6 +130,7 @@ def make_handler(password: str, url: str):
             self.send_html(input_page())
 
         def do_POST(self) -> None:  # noqa: N802
+            print(f"📥 [REQUEST] POST {self.path} (来自 {self.client_address[0]})", flush=True)
             if self.path not in {"/prepare", "/solve", "/api/ocr_test", "/api/grade", "/api/normalize_ocr", "/api/grade_steps", "/api/grade_photo"}:
                 self.send_error(404)
                 return
