@@ -3,45 +3,33 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
 import re
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from email.parser import BytesParser
 from email.policy import default
-from getpass import getpass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
 
 from deepseek_client import DeepSeekClient
 from errors import friendly_message
-from multi_solver import ProblemItemOutcome, render_problem_items, solve_all_tasks
 from ocr_client import OcrClient
 from problem import Problem
 
 
-INPUT_TEMPLATE = Path(__file__).with_name("templates") / "input.html"
-CONFIRM_TEMPLATE = Path(__file__).with_name("templates") / "confirm.html"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-
-
-def input_page(question: str = "", error: str = "") -> str:
-    """Render the small local input page without adding a web framework."""
-    return (
-        INPUT_TEMPLATE.read_text(encoding="utf-8")
-        .replace("{{question}}", html.escape(question))
-        .replace("{{error}}", html.escape(error))
-    )
-
-
-def confirm_page(question: str) -> str:
-    """Render the OCR result for user confirmation before any solving call."""
-    return CONFIRM_TEMPLATE.read_text(encoding="utf-8").replace("{{question}}", html.escape(question))
 
 
 def build_problem(question: str, extracted: dict) -> Problem:
@@ -63,30 +51,30 @@ def normalize_item_label(label: object, index: int, total: int) -> str:
     return f"（{number}）"
 
 
-def multipart_form(content_type: str, body: bytes) -> tuple[str, bytes, str]:
-    """Read the two fields in the upload form without adding a web framework."""
+def multipart_form(content_type: str, body: bytes) -> tuple[dict[str, str], bytes, str]:
+    """Read all fields and the image in the upload form without adding a web framework."""
     message = BytesParser(policy=default).parsebytes(
         f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
     )
-    question, image, image_type = "", b"", "image/jpeg"
+    fields: dict[str, str] = {}
+    image, image_type = b"", "image/jpeg"
     for part in message.iter_parts():
         name = part.get_param("name", header="content-disposition")
         value = part.get_payload(decode=True) or b""
-        if name == "question":
-            question = value.decode(part.get_content_charset() or "utf-8", errors="replace").strip()
-        elif name == "image":
+        if name == "image":
             image = value
             ctype = part.get_content_type()
             if ctype and ctype not in {"application/octet-stream", "text/plain"}:
                 image_type = ctype
-    return question, image, image_type
+        elif name:
+            fields[name] = value.decode(part.get_content_charset() or "utf-8", errors="replace").strip()
+    return fields, image, image_type
 
 
-OCR_TEST_TEMPLATE = Path(__file__).with_name("templates") / "ocr_test.html"
-GRADE_TEMPLATE = Path(__file__).with_name("templates") / "grade.html"
+STUDIO_TEMPLATE = Path(__file__).with_name("templates") / "studio.html"
 
 
-def make_handler(password: str, url: str):
+def make_handler():
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:
             sys.stdout.write(f"[{self.log_date_time_string()}] {self.client_address[0]} - {format % args}\n")
@@ -97,6 +85,8 @@ def make_handler(password: str, url: str):
                 data = page.encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -109,6 +99,8 @@ def make_handler(password: str, url: str):
                 data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -118,62 +110,98 @@ def make_handler(password: str, url: str):
 
         def do_GET(self) -> None:  # noqa: N802
             print(f"📥 [REQUEST] GET {self.path} (来自 {self.client_address[0]})", flush=True)
-            if self.path in {"/ocr_test", "/test"}:
-                self.send_html(OCR_TEST_TEMPLATE.read_text(encoding="utf-8"))
+            if self.path in {"/", "/studio", "/grade", "/ocr_test", "/test"}:
+                self.send_html(STUDIO_TEMPLATE.read_text(encoding="utf-8"))
                 return
-            if self.path == "/grade":
-                self.send_html(GRADE_TEMPLATE.read_text(encoding="utf-8"))
-                return
-            if self.path != "/":
-                self.send_error(404)
-                return
-            self.send_html(input_page())
+            self.send_error(404)
 
         def do_POST(self) -> None:  # noqa: N802
             print(f"📥 [REQUEST] POST {self.path} (来自 {self.client_address[0]})", flush=True)
-            if self.path not in {"/prepare", "/solve", "/api/ocr_test", "/api/grade", "/api/normalize_ocr", "/api/grade_steps", "/api/grade_photo"}:
+            if self.path not in {"/api/ocr_test", "/api/grade", "/api/normalize_ocr", "/api/grade_steps", "/api/grade_photo", "/api/solve_standard", "/api/analyze"}:
                 self.send_error(404)
                 return
-            length = int(self.headers.get("Content-Length", "0"))
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                self.send_json({"error": "请求长度格式无效。"}, status=400)
+                return
             if length > MAX_UPLOAD_BYTES:
-                if self.path in {"/api/ocr_test", "/api/grade", "/api/normalize_ocr", "/api/grade_steps", "/api/grade_photo"}:
-                    self.send_json({"error": "上传数据不能超过 10 MB。"}, status=400)
-                else:
-                    self.send_html(input_page(error="图片不能超过 10 MB。"), status=400)
+                self.send_json({"error": "上传数据不能超过 10 MB。"}, status=400)
                 return
             body = self.rfile.read(length)
-            question = ""
             try:
-                if self.path == "/api/grade_photo":
+                if self.path in {"/api/grade_photo", "/api/analyze"}:
                     content_type = self.headers.get("Content-Type", "")
                     if not content_type.startswith("multipart/form-data"):
                         raise ValueError("上传表单格式无效。")
                     import time
-                    selected_model, image, image_type = multipart_form(content_type, body)
+                    fields, image, image_type = multipart_form(content_type, body)
                     if not image:
                         raise ValueError("未接收到图片数据。")
                     
-                    t0 = time.time()
+                    intent = fields.get("intent", "auto").strip().lower()
+                    if intent not in {"auto", "grade", "solve"}:
+                        raise ValueError("处理方式无效。")
+                    selected_model = fields.get("model", "") or fields.get("question", "")
                     model_to_use = selected_model.strip() if selected_model and ("Paddle" in selected_model or "DeepSeek" in selected_model) else None
                     
+                    t0 = time.time()
                     # 1. OCR 识别
                     raw_text = OcrClient().transcribe(image, image_type, model=model_to_use)
                     t_ocr = time.time() - t0
-                    
-                    # 2. 语义规范化与题干/步骤分离
                     ds_client = DeepSeekClient()
+
+                    # 若选择【纯题干标准求解】模式，直接生成高中数学高考满分标准步骤推导
+                    if intent == "solve":
+                        sol_res = ds_client.generate_standard_solution(raw_text)
+                        t_solve = time.time() - t0 - t_ocr
+                        total_time = time.time() - t0
+                        self.send_json({
+                            "mode": "solve",
+                            "raw_ocr_text": raw_text,
+                            "question_stem": sol_res.get("question_stem", raw_text),
+                            "solution_data": sol_res,
+                            "model_used": model_to_use or OcrClient().default_model,
+                            "timings": {
+                                "ocr_seconds": round(t_ocr, 2),
+                                "solver_seconds": round(t_solve, 2),
+                                "total_seconds": round(total_time, 2)
+                            }
+                        })
+                        return
+
+                    # 2. 语义规范化与题干/步骤分离
                     norm_res = ds_client.normalize_ocr_math_steps(raw_text)
                     t_norm = time.time() - t0 - t_ocr
-                    
-                    # 3. 符号数学智能批改
                     stem = norm_res.get("question_stem", "")
                     steps = norm_res.get("steps", [])
+
+                    # 若智能自适应模式下未检测到手写解题步骤，自动切为标准求解
+                    if intent == "auto" and (not steps or len(steps) == 0):
+                        sol_res = ds_client.generate_standard_solution(stem or raw_text)
+                        t_solve = time.time() - t0 - t_ocr - t_norm
+                        total_time = time.time() - t0
+                        self.send_json({
+                            "mode": "solve",
+                            "raw_ocr_text": raw_text,
+                            "question_stem": sol_res.get("question_stem", stem or raw_text),
+                            "solution_data": sol_res,
+                            "model_used": model_to_use or OcrClient().default_model,
+                            "timings": {
+                                "ocr_seconds": round(t_ocr, 2),
+                                "solver_seconds": round(t_solve, 2),
+                                "total_seconds": round(total_time, 2)
+                            }
+                        })
+                        return
+
+                    # 3. 符号数学智能批改
                     from grader import grade_normalized_steps
                     report = grade_normalized_steps(stem, steps, ds_client)
                     t_grade = time.time() - t0 - t_ocr - t_norm
-                    
                     total_time = time.time() - t0
                     self.send_json({
+                        "mode": "grade",
                         "raw_ocr_text": raw_text,
                         "question_stem": stem,
                         "normalized_steps": steps,
@@ -187,6 +215,16 @@ def make_handler(password: str, url: str):
                             "total_seconds": round(total_time, 2)
                         }
                     })
+                    return
+
+                if self.path == "/api/solve_standard":
+                    payload = json.loads(body.decode("utf-8"))
+                    stem = payload.get("question_stem", "").strip()
+                    if not stem:
+                        raise ValueError("题干不能为空。")
+                    ds_client = DeepSeekClient()
+                    sol_res = ds_client.generate_standard_solution(stem)
+                    self.send_json(sol_res)
                     return
 
                 if self.path == "/api/normalize_ocr":
@@ -242,10 +280,11 @@ def make_handler(password: str, url: str):
                     if not content_type.startswith("multipart/form-data"):
                         raise ValueError("上传表单格式无效。")
                     import time
-                    selected_model, image, image_type = multipart_form(content_type, body)
+                    fields, image, image_type = multipart_form(content_type, body)
                     if not image:
                         raise ValueError("未接收到图片数据。")
                     t0 = time.time()
+                    selected_model = fields.get("model", "") or fields.get("question", "")
                     model_to_use = selected_model.strip() if selected_model and ("Paddle" in selected_model or "DeepSeek" in selected_model) else None
                     text = OcrClient().transcribe(image, image_type, model=model_to_use)
                     elapsed = time.time() - t0
@@ -258,47 +297,11 @@ def make_handler(password: str, url: str):
                         "model_used": model_to_use or OcrClient().default_model,
                     })
                     return
-
-                if self.path == "/prepare":
-                    content_type = self.headers.get("Content-Type", "")
-                    if not content_type.startswith("multipart/form-data"):
-                        raise ValueError("上传表单格式无效。")
-                    question, image, image_type = multipart_form(content_type, body)
-                    if image:
-                        question = OcrClient().transcribe(image, image_type)
-                    if not question:
-                        raise ValueError("请输入题干或上传题目图片。")
-                    self.send_html(confirm_page(question))
-                    return
-
-                form = parse_qs(body.decode("utf-8"))
-                question = form.get("question", [""])[0].strip()
-                if not question:
-                    raise ValueError("题干不能为空。")
-                client = DeepSeekClient()
-                extracted = client.extract_problems(question)
-                extracted_items = extracted.get("items")
-                if not isinstance(extracted_items, list) or not extracted_items:
-                    raise ValueError("未能从题目中提取出函数表达式。")
-                item_results: list[ProblemItemOutcome] = []
-                total = len(extracted_items)
-                for index, item in enumerate(extracted_items, start=1):
-                    problem = build_problem(question, item)
-                    outcomes = solve_all_tasks(problem, password, url, client)
-                    label = normalize_item_label(item.get("label"), index, total)
-                    item_results.append(ProblemItemOutcome(label, problem, outcomes))
-                self.send_html(render_problem_items(question, item_results))
             except Exception as error:
                 import traceback
                 print(f"❌ [ERROR] {self.path} 处理失败: {error}", flush=True)
                 traceback.print_exc()
-                if self.path.startswith("/api/"):
-                    self.send_json({"error": friendly_message(error)}, status=400)
-                else:
-                    self.send_html(input_page(question, friendly_message(error)), status=400)
-
-        def log_message(self, format: str, *args: object) -> None:
-            print(format % args)
+                self.send_json({"error": friendly_message(error)}, status=400)
 
     return Handler
 
@@ -310,16 +313,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="本地数学解题网页")
     parser.add_argument("--host", default=default_host)
     parser.add_argument("--port", type=int, default=default_port)
-    parser.add_argument("--url", default="http://localhost:7474/db/math/tx/commit")
     args = parser.parse_args()
-
-    password = os.getenv("NEO4J_PASSWORD", "")
-    if not password and not os.getenv("SPACE_ID") and sys.stdin.isatty():
-        try:
-            password = getpass("Neo4j password: ")
-        except Exception:
-            password = ""
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(password, args.url))
+    server = ThreadingHTTPServer((args.host, args.port), make_handler())
     print(f"打开 http://{args.host}:{args.port}")
     try:
         server.serve_forever()
