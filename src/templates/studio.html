@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Study Buddy Studio</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #f4f6f3;
+        --surface: #fff;
+        --soft: #f8faf8;
+        --text: #18201c;
+        --muted: #667069;
+        --line: #dce2dd;
+        --primary: #2457a7;
+        --primary-hover: #1c4689;
+        --primary-soft: #edf3fc;
+        --success: #26734d;
+        --success-soft: #edf7f1;
+        --warning: #8b5a1b;
+        --warning-soft: #fbf5e9;
+        --danger: #a33a3a;
+        --danger-soft: #fbefef;
+        font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--page); color: var(--text); line-height: 1.6; }
+      button, textarea, input { font: inherit; }
+      button { cursor: pointer; }
+      button:disabled { cursor: wait; opacity: .62; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { margin-bottom: 0; font-size: 26px; line-height: 1.25; }
+      h2 { margin-bottom: 0; font-size: 18px; }
+      h3 { margin-bottom: 10px; font-size: 15px; }
+
+      .shell { width: min(960px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 48px; }
+      .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+      .brand { margin: 0 0 3px; color: var(--primary); font-size: 12px; font-weight: 750; }
+      .service-state { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+      .service-state::before { width: 8px; height: 8px; border-radius: 50%; background: var(--success); content: ""; }
+
+      .panel { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+      .panel + .panel { margin-top: 18px; }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+      .panel-body { padding: 20px; }
+
+      .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: var(--soft); }
+      .segment { min-width: 92px; padding: 6px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; }
+      .segment[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(24, 32, 28, .12); }
+      .input-pane[hidden], .preview[hidden], .result-panel[hidden], .result-block[hidden], details[hidden] { display: none; }
+
+      .drop-zone { display: grid; min-height: 190px; place-items: center; padding: 24px; border: 1px dashed #aab6ad; border-radius: 8px; background: var(--soft); text-align: center; transition: border-color 150ms ease, background 150ms ease; }
+      .drop-zone:hover, .drop-zone:focus-visible, .drop-zone.is-dragging { outline: none; border-color: var(--primary); background: var(--primary-soft); }
+      .drop-zone strong { display: block; margin-bottom: 4px; font-size: 15px; }
+      .drop-zone span { color: var(--muted); font-size: 13px; }
+      .file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+      .preview { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; align-items: center; gap: 14px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+      .preview img { width: 112px; height: 76px; border-radius: 5px; object-fit: cover; }
+      .file-name { overflow: hidden; margin-bottom: 2px; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+      .file-meta { color: var(--muted); font-size: 12px; }
+
+      .text-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .field-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 650; }
+      .optional { color: var(--muted); font-weight: 450; }
+      textarea { width: 100%; min-height: 154px; resize: vertical; padding: 11px 12px; border: 1px solid #cbd3cd; border-radius: 7px; color: var(--text); background: var(--surface); font-size: 14px; line-height: 1.65; }
+      textarea:focus { outline: 2px solid rgba(36, 87, 167, .18); border-color: var(--primary); }
+
+      .options { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; padding: 0; border: 0; }
+      .options legend { width: 100%; margin-bottom: 7px; font-size: 13px; font-weight: 650; }
+      .option { position: relative; }
+      .option input { position: absolute; opacity: 0; pointer-events: none; }
+      .option span { display: block; padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface); font-size: 13px; }
+      .option input:checked + span { border-color: #9eb6dc; color: var(--primary); background: var(--primary-soft); font-weight: 650; }
+      .option input:focus-visible + span { outline: 2px solid rgba(36, 87, 167, .22); }
+
+      .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+      .feedback { min-height: 22px; margin: 0; color: var(--muted); font-size: 13px; }
+      .feedback.is-error { color: var(--danger); }
+      .button-group { display: flex; gap: 8px; }
+      .button { min-height: 40px; padding: 8px 15px; border: 1px solid transparent; border-radius: 7px; font-size: 14px; font-weight: 700; }
+      .button-primary { color: #fff; background: var(--primary); }
+      .button-primary:hover:not(:disabled) { background: var(--primary-hover); }
+      .button-secondary { border-color: var(--line); color: var(--text); background: var(--surface); }
+      .button-secondary:hover:not(:disabled) { background: var(--soft); }
+      .button-quiet { min-height: 34px; padding: 5px 10px; border-color: var(--line); color: var(--muted); background: transparent; font-size: 12px; }
+
+      .result-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+      .result-block + .result-block { margin-top: 22px; padding-top: 22px; border-top: 1px solid var(--line); }
+      .question-text { padding-left: 13px; border-left: 3px solid #b8c9e4; white-space: pre-wrap; }
+      .notice { margin-bottom: 16px; padding: 10px 12px; border: 1px solid #d9cba9; border-radius: 7px; color: #6f4d18; background: var(--warning-soft); font-size: 13px; }
+      .knowledge-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+      .tag { padding: 3px 8px; border-radius: 5px; color: #385477; background: #edf2f8; font-size: 12px; }
+      .subquestion, .grade-step { padding: 14px 0; border-top: 1px solid var(--line); }
+      .subquestion:first-of-type, .grade-step:first-of-type { border-top: 0; }
+      .subquestion-title, .grade-step-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-weight: 700; }
+      .method { color: var(--primary); font-size: 12px; font-weight: 650; }
+      .solution-step { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 7px; margin: 8px 0; }
+      .step-number { color: var(--muted); font-size: 13px; font-weight: 650; }
+      .answer { margin-top: 11px; padding: 9px 11px; border-left: 3px solid var(--success); color: #174f34; background: var(--success-soft); }
+      .verdict { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; padding: 11px 12px; border-radius: 7px; }
+      .verdict.correct { color: #174f34; background: var(--success-soft); }
+      .verdict.partial { color: #6f4d18; background: var(--warning-soft); }
+      .verdict.review { color: #6f4d18; background: var(--warning-soft); }
+      .verdict.incorrect { color: #7f2929; background: var(--danger-soft); }
+      .score { white-space: nowrap; font-weight: 750; }
+      .grade-step.is-passed .method { color: var(--success); }
+      .grade-step.is-invalid .method { color: var(--danger); }
+      .grade-step.is-advisory .method { color: var(--primary); }
+      .grade-step.is-unverified .method { color: var(--warning); }
+      .grade-comment { color: var(--muted); font-size: 13px; }
+      .grade-step.is-advisory .grade-comment,
+      .grade-step.is-unverified .grade-comment,
+      .grade-step.is-invalid .grade-comment {
+        padding: 8px 10px;
+        border-radius: 6px;
+      }
+      .grade-step.is-advisory .grade-comment {
+        color: #385477;
+        background: #f2f6fb;
+      }
+      .grade-step.is-unverified .grade-comment {
+        color: #6f4d18;
+        background: var(--warning-soft);
+      }
+      .grade-step.is-invalid .grade-comment {
+        color: #7f2929;
+        background: var(--danger-soft);
+      }
+      .reference-solution { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+      details { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 14px; }
+      summary { color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 650; }
+      .raw-output { min-height: 130px; margin-top: 10px; font-family: Consolas, monospace; font-size: 12px; }
+      .spinner { display: none; width: 14px; height: 14px; margin-right: 7px; border: 2px solid rgba(255,255,255,.42); border-top-color: #fff; border-radius: 50%; vertical-align: -2px; animation: spin 800ms linear infinite; }
+      .is-busy .spinner { display: inline-block; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      @media (max-width: 700px) {
+        .shell { width: min(100% - 20px, 960px); padding-top: 18px; }
+        .topbar, .panel-header, .actions, .verdict { align-items: stretch; flex-direction: column; }
+        .service-state, .result-meta { white-space: normal; }
+        .panel-header, .panel-body { padding: 15px; }
+        .segmented { width: 100%; }
+        .segment { flex: 1; min-width: 0; }
+        .text-grid { grid-template-columns: 1fr; }
+        .preview { grid-template-columns: 76px minmax(0, 1fr) auto; }
+        .preview img { width: 76px; height: 58px; }
+        .button-group { width: 100%; }
+        .button-group .button { flex: 1; }
+        .subquestion-title, .grade-step-title { align-items: flex-start; flex-direction: column; gap: 3px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div><p class="brand">Study Buddy</p><h1>学习桌面</h1></div>
+        <div class="service-state">服务已连接</div>
+      </header>
+
+      <section class="panel" aria-labelledby="input-title">
+        <div class="panel-header">
+          <h2 id="input-title">提交题目</h2>
+          <div class="segmented" role="tablist" aria-label="输入方式">
+            <button class="segment" id="image-tab" type="button" role="tab" aria-selected="true" aria-controls="image-pane">图片</button>
+            <button class="segment" id="text-tab" type="button" role="tab" aria-selected="false" aria-controls="text-pane">文字</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="input-pane" id="image-pane" role="tabpanel" aria-labelledby="image-tab">
+            <input class="file-input" id="file-input" type="file" accept="image/png,image/jpeg,image/webp" />
+            <div class="drop-zone" id="drop-zone" role="button" tabindex="0">
+              <div><strong>选择、拖入或粘贴题目图片</strong><span>支持 PNG、JPEG、WEBP，最大 10 MB</span></div>
+            </div>
+            <div class="preview" id="preview" hidden>
+              <img id="preview-image" alt="待处理题目预览" />
+              <div><div class="file-name" id="file-name"></div><div class="file-meta" id="file-meta"></div></div>
+              <button class="button button-quiet" id="remove-file" type="button">移除</button>
+            </div>
+          </div>
+
+          <div class="input-pane" id="text-pane" role="tabpanel" aria-labelledby="text-tab" hidden>
+            <div class="text-grid">
+              <div><label class="field-label" for="question-input">题干</label><textarea id="question-input" placeholder="输入完整数学题目……"></textarea></div>
+              <div><label class="field-label" for="steps-input">作答过程 <span class="optional">选填</span></label><textarea id="steps-input" placeholder="需要批改时输入解题步骤；留空则生成参考解答。"></textarea></div>
+            </div>
+          </div>
+
+          <fieldset class="options">
+            <legend>处理模式</legend>
+            <label class="option"><input type="radio" name="intent" value="auto" checked /><span>自动</span></label>
+            <label class="option"><input type="radio" name="intent" value="grade" /><span>批改</span></label>
+            <label class="option"><input type="radio" name="intent" value="solve" /><span>求解</span></label>
+          </fieldset>
+
+          <div class="actions">
+            <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+            <div class="button-group">
+              <button class="button button-secondary" id="ocr-button" type="button">识别文字</button>
+              <button class="button button-primary" id="run-button" type="button"><span class="spinner" aria-hidden="true"></span><span id="run-label">开始分析</span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel result-panel" id="result-panel" aria-labelledby="result-title" hidden>
+        <div class="panel-header"><h2 id="result-title">分析结果</h2><div class="result-meta" id="result-meta"></div></div>
+        <div class="panel-body">
+          <section class="result-block"><h3>题目</h3><div class="question-text math-content" id="question-output"></div></section>
+          <section class="result-block" id="solution-block" hidden><h3>AI 参考解答</h3><div class="notice">该解答由模型生成，尚未经过知识图谱与符号计算的完整验证。</div><div id="solution-output"></div></section>
+          <section class="result-block" id="grading-block" hidden><h3>作答批改</h3><div id="grading-output"></div></section>
+          <details id="raw-details" hidden><summary>查看 OCR 原始文本</summary><textarea class="raw-output" id="raw-output" readonly></textarea></details>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const MAX_FILE_BYTES = 10 * 1024 * 1024;
+      const OCR_MODEL = "PaddlePaddle/PaddleOCR-VL-1.5";
+      const state = { inputMode: "image", file: null, previewUrl: "" };
+      const byId = (id) => document.getElementById(id);
+      const ui = {
+        imageTab: byId("image-tab"), textTab: byId("text-tab"), imagePane: byId("image-pane"), textPane: byId("text-pane"),
+        fileInput: byId("file-input"), dropZone: byId("drop-zone"), preview: byId("preview"), previewImage: byId("preview-image"),
+        fileName: byId("file-name"), fileMeta: byId("file-meta"), removeFile: byId("remove-file"), questionInput: byId("question-input"),
+        stepsInput: byId("steps-input"), feedback: byId("feedback"), ocrButton: byId("ocr-button"), runButton: byId("run-button"),
+        runLabel: byId("run-label"), resultPanel: byId("result-panel"), resultMeta: byId("result-meta"), questionOutput: byId("question-output"),
+        solutionBlock: byId("solution-block"), solutionOutput: byId("solution-output"), gradingBlock: byId("grading-block"),
+        gradingOutput: byId("grading-output"), rawDetails: byId("raw-details"), rawOutput: byId("raw-output")
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+      }
+
+      function renderMath(container) {
+        if (!container || typeof renderMathInElement !== "function") return;
+        renderMathInElement(container, { delimiters: [
+          { left: "$$", right: "$$", display: true }, { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false }, { left: "$", right: "$", display: false }
+        ], throwOnError: false });
+      }
+
+      function feedback(message = "", isError = false) { ui.feedback.textContent = message; ui.feedback.classList.toggle("is-error", isError); }
+      function setInputMode(mode) {
+        state.inputMode = mode;
+        const image = mode === "image";
+        ui.imageTab.setAttribute("aria-selected", String(image)); ui.textTab.setAttribute("aria-selected", String(!image));
+        ui.imagePane.hidden = !image; ui.textPane.hidden = image; ui.ocrButton.hidden = !image; feedback();
+      }
+
+      function clearFile() {
+        state.file = null; ui.fileInput.value = ""; ui.preview.hidden = true;
+        if (state.previewUrl) URL.revokeObjectURL(state.previewUrl); state.previewUrl = "";
+      }
+
+      function useFile(file) {
+        if (!file || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) return feedback("请选择 PNG、JPEG 或 WEBP 图片。", true);
+        if (file.size > MAX_FILE_BYTES) return feedback("图片不能超过 10 MB。", true);
+        clearFile(); state.file = file; state.previewUrl = URL.createObjectURL(file); ui.previewImage.src = state.previewUrl;
+        ui.fileName.textContent = file.name || "粘贴的题目图片"; ui.fileMeta.textContent = `${(file.size / 1024).toFixed(1)} KB · ${file.type}`;
+        ui.preview.hidden = false; feedback("图片已就绪。选择处理方式后开始分析。");
+      }
+
+      function setBusy(busy, label = "开始分析") {
+        ui.runButton.disabled = busy; ui.ocrButton.disabled = busy; ui.runButton.classList.toggle("is-busy", busy); ui.runLabel.textContent = label;
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options); let data;
+        try { data = await response.json(); } catch { throw new Error("服务返回了无法识别的响应。"); }
+        if (!response.ok) throw new Error(data.error || "请求处理失败。"); return data;
+      }
+
+      function showBase(question, raw = "", meta = "") {
+        ui.resultPanel.hidden = false; ui.questionOutput.textContent = question || raw || "未识别出题干"; ui.resultMeta.textContent = meta;
+        ui.solutionBlock.hidden = true; ui.gradingBlock.hidden = true; ui.rawDetails.hidden = !raw; ui.rawOutput.value = raw; renderMath(ui.questionOutput);
+      }
+
+      function renderSolution(data, raw = "", timings = null) {
+        const sol = data.solution_data || data; showBase(data.question_stem || sol.question_stem || raw, raw, timings?.total_seconds ? `用时 ${timings.total_seconds} 秒` : "");
+        ui.solutionBlock.hidden = false;
+        const tags = Array.isArray(sol.knowledge_points) ? sol.knowledge_points.map((x) => `<span class="tag">${escapeHtml(x)}</span>`).join("") : "";
+        const questions = Array.isArray(sol.subquestions) ? sol.subquestions : [];
+        const sections = questions.map((item) => {
+          const steps = Array.isArray(item.solution_steps) ? item.solution_steps : [];
+          const stepHtml = steps.map((step, i) => `<div class="solution-step"><span class="step-number">${i + 1}.</span><div class="math-content">${escapeHtml(step)}</div></div>`).join("");
+          return `<section class="subquestion"><div class="subquestion-title"><span>${escapeHtml(item.label)} ${escapeHtml(item.question_content)}</span><span class="method">${escapeHtml(item.core_method)}</span></div>${stepHtml}<div class="answer math-content"><strong>结论：</strong> ${escapeHtml(item.final_answer)}</div></section>`;
+        }).join("");
+        ui.solutionOutput.innerHTML = `${tags ? `<div class="knowledge-list">${tags}</div>` : ""}${sol.method_summary ? `<p>${escapeHtml(sol.method_summary)}</p>` : ""}${sections || "<p>服务没有返回可展示的解题步骤。</p>"}`;
+        renderMath(ui.solutionOutput);
+      }
+
+      function renderGrading(data, raw = "", timings = null) {
+        const report = data.grading_report || data; showBase(data.question_stem || report.question || raw, raw, timings?.total_seconds ? `用时 ${timings.total_seconds} 秒` : "");
+        ui.gradingBlock.hidden = false; const verdict = report.overall_verdict || "INCORRECT";
+        const kind = verdict === "CORRECT" ? "correct" : verdict === "PARTIALLY_CORRECT" ? "partial" : verdict === "NEEDS_REVIEW" ? "review" : "incorrect";
+        const title = verdict === "CORRECT" ? "全部正确" : verdict === "PARTIALLY_CORRECT" ? "部分正确" : verdict === "NEEDS_REVIEW" ? "需要确认" : "需要订正";
+        const evaluations = Array.isArray(report.steps_evaluation) ? report.steps_evaluation : [];
+        const steps = evaluations.map((item) => {
+          const status = item.evaluation_status || (item.is_valid ? "passed" : "failed");
+          const statusClass = status === "passed_with_note" ? "is-advisory" : status === "unverified" ? "is-unverified" : status === "failed" ? "is-invalid" : "is-passed";
+          const statusText = status === "passed_with_note" ? "通过 · 建议补充" : status === "unverified" ? "无法确认" : status === "failed" ? "未通过" : "通过";
+          const stepScore = item.step_score == null ? "待确认" : `${escapeHtml(item.step_score)}/${escapeHtml(item.max_score)} 分`;
+          return `<section class="grade-step ${statusClass}"><div class="grade-step-title"><span>第 ${escapeHtml(item.step_index)} 步</span><span class="method">${statusText} · ${stepScore}</span></div><div class="math-content">${escapeHtml(item.raw_text)}</div><div class="grade-comment">${escapeHtml(item.feedback)}</div></section>`;
+        }).join("");
+        const standard = Array.isArray(report.standard_solution_steps) ? report.standard_solution_steps.map((step, i) => `<div class="solution-step"><span class="step-number">${i + 1}.</span><div class="math-content">${escapeHtml(step)}</div></div>`).join("") : "";
+        const totalScore = report.score_final === false ? "评分待确认" : `${escapeHtml(report.total_score ?? 0)} / ${escapeHtml(report.max_total_score ?? 0)} 分`;
+        ui.gradingOutput.innerHTML = `<div class="verdict ${kind}"><strong>${title}</strong><span class="score">${totalScore}</span></div>${report.first_error_step_index ? `<div class="notice">首个需要订正的位置：第 ${escapeHtml(report.first_error_step_index)} 步。</div>` : ""}${report.summary_feedback ? `<p>${escapeHtml(report.summary_feedback)}</p>` : ""}${steps || "<p>服务没有返回分步批改结果。</p>"}${standard ? `<div class="result-block reference-solution"><h3>参考步骤</h3>${standard}</div>` : ""}`;
+        renderMath(ui.gradingOutput);
+      }
+
+      async function analyze() {
+        const intent = document.querySelector('input[name="intent"]:checked')?.value || "auto"; feedback(); setBusy(true, intent === "grade" ? "正在批改…" : "正在分析…");
+        try {
+          if (state.inputMode === "image") {
+            if (!state.file) throw new Error("请先选择或粘贴题目图片。");
+            const form = new FormData(); form.append("image", state.file, state.file.name || "question.png"); form.append("intent", intent); form.append("model", OCR_MODEL);
+            const data = await requestJson("/api/analyze", { method: "POST", body: form });
+            data.mode === "grade" && data.grading_report ? renderGrading(data, data.raw_ocr_text, data.timings) : renderSolution(data, data.raw_ocr_text, data.timings);
+          } else {
+            const question = ui.questionInput.value.trim(); const steps = ui.stepsInput.value.trim();
+            if (!question) throw new Error("请输入完整题干。"); if (intent === "grade" && !steps) throw new Error("批改作答时需要填写解题步骤。");
+            if (intent === "grade" || (intent === "auto" && steps)) {
+              const data = await requestJson("/api/grade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, steps_text: steps }) }); renderGrading(data);
+            } else {
+              const data = await requestJson("/api/solve_standard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question_stem: question }) }); renderSolution(data);
+            }
+          }
+          feedback("处理完成。"); ui.resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (error) { feedback(error.message || "处理失败，请稍后重试。", true); } finally { setBusy(false); }
+      }
+
+      async function recognizeOnly() {
+        feedback(); if (!state.file) return feedback("请先选择或粘贴题目图片。", true); setBusy(true, "正在识别…");
+        try {
+          const form = new FormData(); form.append("image", state.file, state.file.name || "question.png"); form.append("model", OCR_MODEL);
+          const data = await requestJson("/api/ocr_test", { method: "POST", body: form }); showBase(data.text, data.text, `用时 ${data.elapsed_seconds ?? "-"} 秒`); feedback("文字识别完成。"); ui.resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (error) { feedback(error.message || "识别失败，请稍后重试。", true); } finally { setBusy(false); }
+      }
+
+      ui.imageTab.addEventListener("click", () => setInputMode("image")); ui.textTab.addEventListener("click", () => setInputMode("text"));
+      ui.dropZone.addEventListener("click", () => ui.fileInput.click()); ui.dropZone.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); ui.fileInput.click(); } });
+      ui.fileInput.addEventListener("change", () => useFile(ui.fileInput.files[0])); ui.removeFile.addEventListener("click", clearFile);
+      ui.dropZone.addEventListener("dragover", (event) => { event.preventDefault(); ui.dropZone.classList.add("is-dragging"); }); ui.dropZone.addEventListener("dragleave", () => ui.dropZone.classList.remove("is-dragging"));
+      ui.dropZone.addEventListener("drop", (event) => { event.preventDefault(); ui.dropZone.classList.remove("is-dragging"); useFile(event.dataTransfer.files[0]); });
+      document.addEventListener("paste", (event) => { if (state.inputMode !== "image") return; const image = [...(event.clipboardData?.items || [])].find((item) => item.type.startsWith("image/"))?.getAsFile(); if (image) useFile(image); });
+      ui.runButton.addEventListener("click", analyze); ui.ocrButton.addEventListener("click", recognizeOnly);
+    </script>
+  </body>
+</html>
