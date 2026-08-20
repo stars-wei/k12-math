@@ -16,6 +16,9 @@ venv/
 /result.html
 /answer.html
 
+# Local experimentation notebook
+/demo.ipynb
+
 # Editor and operating-system files
 .vscode/
 .idea/
