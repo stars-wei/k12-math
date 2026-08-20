@@ -198,7 +198,7 @@ class TestGrader(unittest.TestCase):
         self.assertIn("恭喜", result["summary_feedback"])
 
     def test_grade_normalized_steps_with_discontinuity(self):
-        """Test grading when step 3 has a discontinuity (missing variable a)."""
+        """A confirmed logical break is deducted without poisoning independent later steps."""
         from grader import grade_normalized_steps
 
         stem = r"12. 已知函数 \( f(x) = \frac{ax + b}{1 + x^2} \) 是定义在 \( (-1, 1) \) 上的奇函数，且 \( f\left(\frac{1}{2}\right) = \frac{2}{5} \)，求函数 \( f(x) \) 的解析式。"
@@ -213,7 +213,180 @@ class TestGrader(unittest.TestCase):
         self.assertEqual(result["overall_verdict"], "PARTIALLY_CORRECT")
         self.assertEqual(result["first_error_step_index"], 3)
         self.assertEqual(result["steps_evaluation"][2]["step_score"], 0)
-        self.assertIn("扣分", result["steps_evaluation"][2]["feedback"])
+        self.assertEqual(result["steps_evaluation"][2]["evaluation_status"], "failed")
+        self.assertEqual(result["steps_evaluation"][2]["error_category"], ErrorCategory.LOGIC_DISCONTINUITY.value)
+        self.assertTrue(result["steps_evaluation"][3]["is_valid"])
+        self.assertTrue(result["steps_evaluation"][4]["is_valid"])
+
+    def test_acceptable_algebraic_omission_gets_full_credit(self):
+        """Routine simplification omitted between an equation and a=1 is not an error."""
+        from grader import grade_normalized_steps
+
+        stem = r"12. 已知函数 \( f(x) = \frac{ax + b}{1 + x^2} \) 是定义在 \( (-1, 1) \) 上的奇函数，且 \( f\left(\frac{1}{2}\right) = \frac{2}{5} \)，求函数 \( f(x) \) 的解析式。"
+        steps = [
+            {"step_number": 1, "marker": "because", "step_text": r"\( f(x) \) 是奇函数，∴ \( f(0) = 0 \)", "continuity_status": "complete", "mathematical_validity": "valid"},
+            {"step_number": 2, "marker": "none", "step_text": r"\( b = 0 \)", "continuity_status": "complete", "mathematical_validity": "valid"},
+            {"step_number": 3, "marker": "none", "step_text": r"\( f\left(\frac{1}{2}\right) = \frac{\frac{1}{2}a}{1 + \frac{1}{4}} = \frac{2}{5} \)", "continuity_status": "complete", "mathematical_validity": "valid"},
+            {
+                "step_number": 4,
+                "marker": "therefore",
+                "step_text": r"\( a = 1 \)",
+                "continuity_status": "acceptable_omission",
+                "mathematical_validity": "valid",
+                "omitted_reasoning": r"\( \frac{2a}{5}=\frac{2}{5} \)",
+                "diagnostic_message": r"由 \(\frac{a/2}{1+1/4}=\frac{2}{5}\) 能够正确推出 \(a=1\)，属于常规约分跳步。",
+            },
+            {"step_number": 5, "marker": "therefore", "step_text": r"\( f(x) = \frac{x}{1 + x^2} \)", "continuity_status": "complete", "mathematical_validity": "valid"},
+        ]
+
+        result = grade_normalized_steps(stem, steps)
+
+        self.assertEqual(result["overall_verdict"], "CORRECT")
+        self.assertEqual(result["total_score"], result["max_total_score"])
+        self.assertTrue(result["steps_evaluation"][3]["is_valid"])
+        self.assertEqual(result["steps_evaluation"][3]["evaluation_status"], "passed_with_note")
+        feedback = result["steps_evaluation"][3]["feedback"]
+        self.assertIn(r"\(\frac{a/2}{1+1/4}=\frac{2}{5}\)", feedback)
+        self.assertIn(r"\(a=1\)", feedback)
+        self.assertIn(r"\( \frac{2a}{5}=\frac{2}{5} \)", feedback)
+
+    def test_ambiguous_ocr_step_requires_review_without_direct_deduction(self):
+        """Unreadable OCR produces a review state instead of an automatic error."""
+        from grader import grade_normalized_steps
+
+        stem = "求函数解析式。"
+        steps = [
+            {"step_number": 1, "marker": "none", "step_text": "OCR 残缺算式", "continuity_status": "ambiguous", "mathematical_validity": "unknown", "diagnostic_message": "分母无法辨认"},
+            {"step_number": 2, "marker": "therefore", "step_text": "结论完整", "continuity_status": "complete", "mathematical_validity": "valid"},
+        ]
+
+        result = grade_normalized_steps(stem, steps)
+
+        self.assertEqual(result["overall_verdict"], "NEEDS_REVIEW")
+        self.assertFalse(result["score_final"])
+        self.assertIsNone(result["steps_evaluation"][0]["is_valid"])
+        self.assertIsNone(result["steps_evaluation"][0]["step_score"])
+        self.assertEqual(result["steps_evaluation"][0]["evaluation_status"], "unverified")
+        self.assertTrue(result["steps_evaluation"][1]["is_valid"])
+
+    def test_dual_ocr_disagreement_overrides_invalid_without_deduction(self):
+        """Conflicting OCR evidence is reviewed even if the model also says invalid."""
+        from grader import grade_normalized_steps
+
+        steps = [
+            {
+                "step_number": 1,
+                "marker": "therefore",
+                "step_text": r"\(f(x)=\frac{1-t}{1+x}\)",
+                "continuity_status": "logical_break",
+                "mathematical_validity": "invalid",
+                "ocr_agreement": "disagree",
+                "secondary_ocr_evidence": r"\(f(x)=\frac{1-x}{1+x}\)",
+                "verification_message": "变量 t 与 x 的识别不一致。",
+                "ocr_fix_suggestion": r"f(x)=\frac{1-x}{1+x}",
+            }
+        ]
+
+        result = grade_normalized_steps("求函数解析式。", steps)
+        evaluation = result["steps_evaluation"][0]
+
+        self.assertEqual(result["overall_verdict"], "NEEDS_REVIEW")
+        self.assertIsNone(evaluation["step_score"])
+        self.assertEqual(evaluation["evaluation_status"], "unverified")
+        self.assertEqual(evaluation["continuity_status"], "ambiguous")
+        self.assertEqual(evaluation["ocr_agreement"], "disagree")
+        self.assertIn("变量 t 与 x", evaluation["feedback"])
+
+    def test_agreed_student_error_is_still_deducted(self):
+        """Agreement between OCR models allows a confirmed math error to be scored."""
+        from grader import grade_normalized_steps
+
+        steps = [
+            {
+                "step_number": 1,
+                "marker": "therefore",
+                "step_text": r"\(2[ax+b]+17\)",
+                "continuity_status": "logical_break",
+                "mathematical_validity": "invalid",
+                "ocr_agreement": "agree",
+                "secondary_ocr_evidence": r"\(2[ax+b]+17\)",
+                "verification_message": "两套 OCR 对该表达式识别一致。",
+            }
+        ]
+
+        result = grade_normalized_steps("右端为 2x+17。", steps)
+        evaluation = result["steps_evaluation"][0]
+
+        self.assertEqual(evaluation["step_score"], 0)
+        self.assertEqual(evaluation["evaluation_status"], "failed")
+
+    def test_bare_secondary_ocr_formulas_receive_katex_delimiters(self):
+        """Bare formulas from OCR evidence are made renderable before display."""
+        from grader import grade_normalized_steps
+
+        steps = [
+            {
+                "step_number": 1,
+                "step_text": r"\(f(x)=\frac{1-t}{1+x}\)",
+                "continuity_status": "ambiguous",
+                "mathematical_validity": "unknown",
+                "ocr_agreement": "disagree",
+                "secondary_ocr_evidence": (
+                    r"f(t)=\frac{1-t}{1+t}；f(x)=\frac{1-x}{1+x}"
+                ),
+                "verification_message": "两套 OCR 识别不一致。",
+            }
+        ]
+
+        result = grade_normalized_steps("求函数解析式。", steps)
+        feedback = result["steps_evaluation"][0]["feedback"]
+
+        self.assertIn(r"\(f(t)=\frac{1-t}{1+t}\)", feedback)
+        self.assertIn(r"\(f(x)=\frac{1-x}{1+x}\)", feedback)
+        self.assertIn(r"\)；\(", feedback)
+
+    def test_delimited_secondary_ocr_formula_is_not_wrapped_twice(self):
+        """Evidence already formatted for KaTeX remains unchanged."""
+        from grader import grade_normalized_steps
+
+        evidence = r"\(f(x)=\frac{1-x}{1+x}\)"
+        steps = [
+            {
+                "step_number": 1,
+                "step_text": evidence,
+                "continuity_status": "ambiguous",
+                "mathematical_validity": "unknown",
+                "ocr_agreement": "uncertain",
+                "secondary_ocr_evidence": evidence,
+            }
+        ]
+
+        result = grade_normalized_steps("求函数解析式。", steps)
+        feedback = result["steps_evaluation"][0]["feedback"]
+
+        self.assertEqual(feedback.count(r"\("), 1)
+        self.assertEqual(feedback.count(r"\)"), 1)
+
+    def test_plain_secondary_ocr_text_is_not_treated_as_math(self):
+        """Ordinary Chinese evidence remains ordinary explanatory text."""
+        from grader import grade_normalized_steps
+
+        steps = [
+            {
+                "step_number": 1,
+                "step_text": "字迹不清",
+                "continuity_status": "ambiguous",
+                "mathematical_validity": "unknown",
+                "ocr_agreement": "uncertain",
+                "secondary_ocr_evidence": "该处字迹无法辨认",
+            }
+        ]
+
+        result = grade_normalized_steps("求函数解析式。", steps)
+        feedback = result["steps_evaluation"][0]["feedback"]
+
+        self.assertIn("复核 OCR 识别为：该处字迹无法辨认", feedback)
+        self.assertNotIn(r"\(", feedback)
 
 
 if __name__ == "__main__":

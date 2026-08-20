@@ -27,6 +27,11 @@ Copy-Item .env.example .env
 NEO4J_PASSWORD="你的 Neo4j 密码"
 DEEPSEEK_API_KEY="你的 DeepSeek API Key"
 SILICONFLOW_API_KEY="你的 SiliconFlow API Key"
+POSTGRES_HOST="127.0.0.1"
+POSTGRES_PORT="5432"
+POSTGRES_DB="demo"
+POSTGRES_USER="postgres"
+POSTGRES_PASSWORD="你的 PostgreSQL 密码"
 ```
 
 `.env` 已被 Git 忽略，不要将真实密码或 API Key 写入 `.env.example`。
@@ -92,9 +97,11 @@ python -m unittest discover -s tests -v
 python src/web.py
 ```
 
-打开 `http://127.0.0.1:8000`。系统只提供一个响应式工作台，可通过文字或 PNG/JPEG/WEBP 图片（最大 10 MB）提交题目，并选择自动、批改或求解三种处理模式。图片输入会先由 SiliconFlow OCR 转写，OCR 原文可在结果页折叠查看。
+打开 `http://127.0.0.1:8000`。系统只提供一个响应式工作台，可通过文字或 PNG/JPEG/WEBP 图片（最大 10 MB）提交题目，并选择自动、批改或求解三种处理模式。图片输入会并行调用 PaddleOCR-VL 主识别模型和 DeepSeek-OCR 复核模型；两套结果在关键数学内容上不一致时，对应步骤进入“无法确认”状态，不据此扣分。主 OCR 原文可在结果页折叠查看。
 
 启动工作台前，请确认 `.env` 已填写 `DEEPSEEK_API_KEY`；使用图片输入时还需要 `SILICONFLOW_API_KEY`。工作台中的 AI 参考解答尚未经过知识图谱与 SymPy 的完整验证，页面会明确标注这一边界。
+
+如需保存每次处理的诊断记录，依次执行 [`db/migrations/001_create_observability_tables.sql`](db/migrations/001_create_observability_tables.sql) 和 [`db/migrations/002_add_dual_ocr_evidence.sql`](db/migrations/002_add_dual_ocr_evidence.sql)，再填写上述 PostgreSQL 配置。系统会保存输入元数据、两套 OCR 文本及其一致性证据、DeepSeek 请求与响应、提示词版本、规范化步骤、逐步评分和最终结果，并在 API 响应中返回可用于定位记录的 `trace_id`。上传图片只保存文件名、类型、大小和 SHA-256，不保存图片内容，也不会复制原始图片。未配置 PostgreSQL 或数据库暂时不可用时，现有 OCR、求解和批改流程仍可继续运行。
 
 可输入的完整题干例如：
 

@@ -43,7 +43,7 @@ class StudioContractTests(unittest.TestCase):
             "Content-Type: image/png\r\n\r\n"
         ).encode("utf-8") + b"PNG-DATA\r\n" + f"--{boundary}--\r\n".encode("utf-8")
 
-        fields, image, image_type = multipart_form(
+        fields, image, image_type, image_filename = multipart_form(
             f"multipart/form-data; boundary={boundary}",
             body,
         )
@@ -52,6 +52,7 @@ class StudioContractTests(unittest.TestCase):
         self.assertEqual(fields["model"], "PaddlePaddle/PaddleOCR-VL-1.5")
         self.assertEqual(image, b"PNG-DATA")
         self.assertEqual(image_type, "image/png")
+        self.assertEqual(image_filename, "question.png")
 
     def test_templates_keep_one_web_interface_and_one_cli_report(self) -> None:
         template_dir = Path(__file__).resolve().parents[1] / "src" / "templates"
