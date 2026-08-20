@@ -1,0 +1,1208 @@
+    <!-- KaTeX Math Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+      :root {
+        --primary: #2563eb;
+        --primary-hover: #1d4ed8;
+        --bg: #f8fafc;
+        --card: #ffffff;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --text-muted: #64748b;
+        --success: #16a34a;
+        --success-bg: #f0fdf4;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        padding: 32px 16px;
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      .nav-bar { display: flex; gap: 12px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); font-size: 15px; }
+      .nav-bar a { color: var(--text-muted); text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+      .nav-bar a.active { color: var(--primary); background: #eff6ff; font-weight: 600; }
+      .nav-bar a:hover:not(.active) { color: var(--text); background: #f1f5f9; }
+      header {
+        text-align: center;
+        margin-bottom: 28px;
+      }
+      header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--text);
+      }
+      header p {
+        color: var(--text-muted);
+        font-size: 14px;
+        margin-top: 6px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1.15fr;
+        gap: 20px;
+      }
+      @media (max-width: 768px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      }
+      .card h2 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .upload-zone {
+        border: 2px dashed #cbd5e1;
+        border-radius: 8px;
+        padding: 24px 16px;
+        text-align: center;
+        cursor: pointer;
+        background: #f8fafc;
+        transition: all 0.2s ease;
+      }
+      .upload-zone:hover, .upload-zone.dragover {
+        border-color: var(--primary);
+        background: #eff6ff;
+      }
+      .upload-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+        color: #94a3b8;
+      }
+      .upload-text {
+        font-size: 14px;
+        color: var(--text-muted);
+      }
+      .upload-hint {
+        font-size: 12px;
+        color: #94a3b8;
+        margin-top: 4px;
+      }
+      #file-input { display: none; }
+      .preview-container {
+        margin-top: 14px;
+        display: none;
+        position: relative;
+      }
+      .preview-img {
+        width: 100%;
+        max-height: 280px;
+        object-fit: contain;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: #00000008;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        margin-top: 16px;
+        padding: 10px 18px;
+        font-size: 15px;
+        font-weight: 500;
+        color: #fff;
+        background: var(--primary);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .btn:hover { background: var(--primary-hover); }
+      .btn:disabled { background: #94a3b8; cursor: not-allowed; }
+      .result-meta {
+        display: flex;
+        gap: 16px;
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .result-meta span strong {
+        color: var(--primary);
+      }
+      .result-box {
+        width: 100%;
+        min-height: 210px;
+        font-family: "Cascadia Code", "Fira Code", Consolas, Monaco, monospace;
+        font-size: 13.5px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #f8fafc;
+        resize: vertical;
+        line-height: 1.6;
+        color: #1e293b;
+      }
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 240px;
+        color: #94a3b8;
+        font-size: 14px;
+        border: 1px dashed var(--border);
+        border-radius: 8px;
+      }
+      .spinner {
+        display: none;
+        width: 18px;
+        height: 18px;
+        border: 2px solid #ffffff;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-right: 8px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .action-bar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .btn-normalize {
+        padding: 8px 16px;
+        font-size: 13.5px;
+        font-weight: 600;
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: #ffffff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+        box-shadow: 0 1px 3px rgba(16,185,129,0.25);
+      }
+      .btn-normalize:hover { background: linear-gradient(135deg, #059669, #047857); }
+      .btn-normalize:disabled { background: #94a3b8; cursor: not-allowed; }
+      .render-btn {
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 500;
+        background: #eff6ff;
+        color: var(--primary);
+        border: 1px solid #bfdbfe;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .render-btn:hover { background: #dbeafe; }
+      .copy-btn {
+        padding: 8px 12px;
+        font-size: 13px;
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .copy-btn:hover { background: #e2e8f0; color: #1e293b; }
+
+      /* 纠错与规范化结果面板 */
+      .normalized-panel {
+        margin-top: 24px;
+        display: none;
+      }
+      .norm-summary-card {
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        border-radius: 8px;
+        padding: 14px 18px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        color: #166534;
+        line-height: 1.6;
+      }
+      .stem-box {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--primary);
+        border-radius: 6px;
+        padding: 12px 16px;
+        font-size: 15px;
+        margin-bottom: 16px;
+        line-height: 1.7;
+      }
+      .norm-steps-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .norm-step-card {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        font-size: 15px;
+      }
+      .norm-step-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .badge-marker {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .badge-because { background: #e0f2fe; color: #0369a1; }
+      .badge-therefore { background: #fef3c7; color: #b45309; }
+      .badge-none { background: #f1f5f9; color: #64748b; }
+      .step-correction-note {
+        margin-top: 8px;
+        padding: 6px 10px;
+        background: #f1f5f9;
+        border-left: 3px solid #94a3b8;
+        border-radius: 4px;
+        font-size: 12.5px;
+        color: #475569;
+      }
+      .discontinuity-card {
+        margin-top: 10px;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-left: 4px solid #f59e0b;
+        border-radius: 6px;
+        padding: 12px 14px;
+        font-size: 13.5px;
+      }
+      .discontinuity-title {
+        font-weight: 700;
+        color: #b45309;
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .discontinuity-pedagogy {
+        color: #92400e;
+        line-height: 1.6;
+        margin-bottom: 8px;
+      }
+      .discontinuity-ocr {
+        background: #ffffff;
+        border: 1px dashed #cbd5e1;
+        border-radius: 4px;
+        padding: 8px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        color: #334155;
+      }
+      .btn-quick-fix {
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.2s;
+      }
+      .btn-quick-fix:hover { background: #1d4ed8; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="nav-bar">
+        <a href="/">📐 函数自动求解</a>
+        <a href="/ocr_test" class="active">✍️ 手写 OCR 测试台</a>
+        <a href="/grade">📝 智能作业批改器</a>
+      </div>
+      <header>
+        <h1>✍️ 智能数学手写 OCR 识别与语义纠错测试台</h1>
+        <p>已接入 PaddleOCR-VL-1.5 专业作业视觉大模型与 DeepSeek-OCR，支持 Ctrl+V 直接粘贴截图</p>
+      </header>
+
+      <div class="grid">
+        <!-- 左侧：图片上传与预览 -->
+        <div class="card">
+          <h2>📷 1. 手写图片输入</h2>
+          
+          <div style="margin-bottom: 14px; background: #f8fafc; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 13.5px;">
+            <div style="font-weight: 600; margin-bottom: 6px; color: #334155;">🤖 选择识别视觉引擎：</div>
+            <label style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px; cursor: pointer;">
+              <input type="radio" name="ocr_engine" value="PaddlePaddle/PaddleOCR-VL-1.5" checked>
+              <strong style="color: #059669;">🌟 PaddleOCR-VL-1.5</strong>
+              <span style="color: #64748b; font-size: 12px;">(推荐：手写数学/试卷 0.9B VLM)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio" name="ocr_engine" value="deepseek-ai/DeepSeek-OCR">
+              <span>⚡ DeepSeek-OCR</span>
+              <span style="color: #64748b; font-size: 12px;">(通用文档高吞吐压缩识别)</span>
+            </label>
+          </div>
+
+          <div class="upload-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">点击选择图片，或拖拽图片到这里</div>
+            <div class="upload-hint">支持 PNG、JPEG、WEBP 格式，或直接 Ctrl+V 粘贴</div>
+          </div>
+          <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp">
+
+          <div class="preview-container" id="preview-box">
+            <img class="preview-img" id="preview-image" alt="手写图片预览">
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 14px;">
+            <button class="btn" id="submit-btn" disabled onclick="startOcr()" style="flex: 1;">
+              <span class="spinner" id="btn-spinner"></span>
+              <span id="btn-text">🔍 仅 OCR 识别</span>
+            </button>
+            <button class="btn" id="direct-grade-btn" disabled onclick="startDirectPhotoGrade()" style="flex: 1.4; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border-color: transparent;">
+              <span class="spinner" id="grade-spinner"></span>
+              <span id="grade-btn-text">🚀 拍照直接一键批改</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 右侧：OCR 识别与语义纠错结果 -->
+        <div class="card">
+          <h2>📝 2. OCR 原始识别结果</h2>
+          <div id="result-wrapper">
+            <div class="empty-state" id="empty-state">
+              <span>👈 请在左侧上传或粘贴手写图片</span>
+            </div>
+            <div id="result-content" style="display: none;">
+              <div class="result-meta">
+                <span>🤖 引擎：<strong id="meta-engine">PaddleOCR-VL-1.5</strong></span>
+                <span>⏱️ 耗时：<strong id="meta-time">-</strong> 秒</span>
+                <span>🔤 字符数：<strong id="meta-chars">-</strong></span>
+                <span>📑 行数：<strong id="meta-lines">-</strong></span>
+              </div>
+              <textarea class="result-box" id="result-text" spellcheck="false"></textarea>
+              <div class="action-bar">
+                <button class="btn-normalize" id="btn-norm" onclick="normalizeOcr()">✨ 数学语义纠错与步骤拆解</button>
+                <button class="render-btn" onclick="openRenderTab()">📐 新标签页渲染</button>
+                <button class="copy-btn" onclick="copyResult()">📋 复制文本</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下方：数学语义纠错与结构化步骤展示区 -->
+      <div class="card normalized-panel" id="norm-panel">
+        <h2 style="font-size: 17px; color: #0f172a; margin-bottom: 16px;">
+          <span>✨ 3. 数学语义纠错与规范步骤链（AI 智能修复）</span>
+          <span style="font-size: 13px; font-weight: normal; color: #16a34a;">已自动完成 ∵/∴ 因果修正与公式补齐</span>
+        </h2>
+
+        <!-- 纠错总结 -->
+        <div class="norm-summary-card" id="norm-summary"></div>
+
+        <!-- 剥离出的题干 -->
+        <h3 style="font-size: 14px; margin-bottom: 6px; color: #475569;">📌 自动分离出的【规范题干】：</h3>
+        <div class="stem-box math-render" id="norm-stem"></div>
+
+        <!-- 纠错后的解题步骤链 -->
+        <h3 style="font-size: 14px; margin-top: 18px; margin-bottom: 8px; color: #475569;">🔍 纠错后的【规范解题步骤链】：</h3>
+        <div class="norm-steps-list" id="norm-steps"></div>
+
+        <!-- 4. 一键智能批改操作区 -->
+        <div style="margin-top: 24px; text-align: center;">
+          <button class="btn" id="btn-grade" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: #fff; font-size: 15px; padding: 11px 28px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25); transition: all 0.2s;" onclick="gradeCurrentSteps()">
+            🎯 一键智能做题批改 (AI & SymPy 符号代数判卷)
+          </button>
+        </div>
+
+        <!-- 批改结果面板 -->
+        <div id="grading-panel" style="display: none; margin-top: 28px; border-top: 2px dashed #cbd5e1; padding-top: 20px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <h3 style="font-size: 18px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+              <span>📝 4. 卷面智能批改与踩分点报告</span>
+            </h3>
+            <div id="grade-score-badge" style="font-size: 15px; padding: 6px 16px; border-radius: 20px; font-weight: 700;"></div>
+          </div>
+
+          <!-- 首错告警框 -->
+          <div id="first-error-box" style="display: none; background: #fef2f2; border: 1px solid #fecaca; border-left: 5px solid #ef4444; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; color: #991b1b; line-height: 1.6;"></div>
+
+          <!-- 名师总评 -->
+          <div id="grade-summary-box" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; line-height: 1.7; color: #334155; font-size: 14.5px; white-space: pre-line;"></div>
+
+          <!-- 逐小步得分明细 -->
+          <h4 style="font-size: 14px; margin-bottom: 8px; color: #475569;">📋 逐步得分与诊断明细：</h4>
+          <div id="grade-steps-list" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
+
+          <!-- 标准满分解答 -->
+          <div id="std-solution-box" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px 20px;">
+            <div style="font-weight: 600; color: #166534; margin-bottom: 10px; font-size: 14.5px;">
+              <span>💡 标准满分参考解答 (Ground Truth 证明链)：</span>
+            </div>
+            <div id="std-solution-content" style="color: #14532d; font-size: 14px; line-height: 1.9;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentFile = null;
+
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('file-input');
+      const previewBox = document.getElementById('preview-box');
+      const previewImage = document.getElementById('preview-image');
+      const submitBtn = document.getElementById('submit-btn');
+      const btnSpinner = document.getElementById('btn-spinner');
+      const btnText = document.getElementById('btn-text');
+      const directGradeBtn = document.getElementById('direct-grade-btn');
+      const gradeSpinner = document.getElementById('grade-spinner');
+      const gradeBtnText = document.getElementById('grade-btn-text');
+
+      function handleFile(file) {
+        if (!file || !file.type.startsWith('image/')) {
+          alert('请上传有效的图片文件 (PNG, JPG, WEBP)');
+          return;
+        }
+        currentFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewImage.src = e.target.result;
+          previewBox.style.display = 'block';
+          submitBtn.disabled = false;
+          if (directGradeBtn) directGradeBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+      }
+
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleFile(e.target.files[0]);
+      });
+
+      // 拖拽支持
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+      });
+
+      // 全局粘贴 Ctrl+V 支持
+      document.addEventListener('paste', (e) => {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            const file = items[i].getAsFile();
+            handleFile(file);
+            break;
+          }
+        }
+      });
+
+      async function startDirectPhotoGrade() {
+        if (!currentFile) return;
+
+        directGradeBtn.disabled = true;
+        submitBtn.disabled = true;
+        gradeSpinner.style.display = 'inline-block';
+        gradeBtnText.textContent = '🚀 AI 正在识别与判卷...';
+
+        const formData = new FormData();
+        formData.append('image', currentFile, currentFile.name || 'photo.png');
+        const selectedEngine = document.querySelector('input[name="ocr_engine"]:checked')?.value || 'PaddlePaddle/PaddleOCR-VL-1.5';
+        formData.append('question', selectedEngine);
+
+        try {
+          const resp = await fetch('/api/grade_photo', {
+            method: 'POST',
+            body: formData
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            alert('拍照批改失败: ' + (data.error || '未知错误'));
+            return;
+          }
+
+          // 1. 同步填充 OCR 结果区
+          document.getElementById('empty-state').style.display = 'none';
+          document.getElementById('result-content').style.display = 'block';
+          const engineDisplay = (data.model_used || selectedEngine).includes('Paddle') ? 'PaddleOCR-VL-1.5' : 'DeepSeek-OCR';
+          document.getElementById('meta-engine').textContent = engineDisplay;
+          document.getElementById('meta-time').textContent = data.timings ? data.timings.ocr_seconds : '-';
+          document.getElementById('meta-chars').textContent = data.raw_ocr_text.length;
+          document.getElementById('meta-lines').textContent = data.raw_ocr_text.split('\n').filter(l=>l.trim()).length;
+          document.getElementById('result-text').value = data.raw_ocr_text;
+
+          // 2. 模拟触发步骤展示与批改结果呈现
+          window.currentNormalizedData = {
+            question_stem: data.question_stem,
+            steps: data.normalized_steps,
+            overall_summary: data.overall_summary
+          };
+
+          // 渲染规范步骤面板
+          const panel = document.getElementById('norm-panel');
+          panel.style.display = 'block';
+          document.getElementById('norm-summary').innerHTML = '<strong>💡 整体分析与疑点总结：</strong><br>' + escapeHtml(data.overall_summary);
+          document.getElementById('norm-stem').innerHTML = escapeHtml(data.question_stem);
+
+          const stepsList = document.getElementById('norm-steps');
+          stepsList.innerHTML = '';
+          data.normalized_steps.forEach((step) => {
+            const card = document.createElement('div');
+            card.className = 'norm-step-card';
+            card.id = 'step-card-' + step.step_number;
+            const markerBadge = step.marker === 'because' 
+              ? '<span class="badge-marker badge-because">∵ 因为 (前提)</span>'
+              : (step.marker === 'therefore' 
+                  ? '<span class="badge-marker badge-therefore">∴ 所以 (推导结论)</span>' 
+                  : '<span class="badge-marker badge-none">说明</span>');
+            card.innerHTML = `
+              <div class="norm-step-header">
+                <span style="font-weight: 600; color: #334155;">第 ${step.step_number} 步 · <span style="font-weight: normal; color: #64748b;">${escapeHtml(step.step_intent || '')}</span></span>
+                ${markerBadge}
+              </div>
+              <div class="step-content math-render" id="step-content-${step.step_number}">${escapeHtml(step.step_text || '')}</div>
+            `;
+            stepsList.appendChild(card);
+          });
+
+          // 3. 渲染最终批改面板
+          const report = data.grading_report;
+          const gradingPanel = document.getElementById('grading-panel');
+          gradingPanel.style.display = 'block';
+
+          const scoreBadge = document.getElementById('grade-score-badge');
+          const isCorrect = report.overall_verdict === 'CORRECT';
+          const isPartial = report.overall_verdict === 'PARTIALLY_CORRECT';
+
+          if (isCorrect) {
+            scoreBadge.style.background = '#dcfce7';
+            scoreBadge.style.color = '#15803d';
+            scoreBadge.textContent = `🎯 满分 ${report.total_score} / ${report.max_total_score} 分 (全部正确)`;
+          } else if (isPartial) {
+            scoreBadge.style.background = '#fef3c7';
+            scoreBadge.style.color = '#b45309';
+            scoreBadge.textContent = `⚠️ 得分 ${report.total_score} / ${report.max_total_score} 分 (部分得分)`;
+          } else {
+            scoreBadge.style.background = '#fee2e2';
+            scoreBadge.style.color = '#b91c1c';
+            scoreBadge.textContent = `❌ 得分 ${report.total_score} / ${report.max_total_score} 分 (存在严重错误)`;
+          }
+
+          const errBox = document.getElementById('first-error-box');
+          if (report.first_error_step_index) {
+            errBox.style.display = 'block';
+            errBox.innerHTML = `<strong>🚨 首处失分定位：第 ${report.first_error_step_index} 步出现错误！</strong><br>该步骤推导未通过符号代数等价性或存在关键未知数遗漏。`;
+          } else {
+            errBox.style.display = 'none';
+          }
+
+          document.getElementById('grade-summary-box').innerHTML = escapeHtml(report.summary_feedback);
+
+          const gradeStepsList = document.getElementById('grade-steps-list');
+          gradeStepsList.innerHTML = '';
+          (report.steps_evaluation || []).forEach(e => {
+            const row = document.createElement('div');
+            row.style.background = e.is_valid ? '#f8fafc' : '#fff1f2';
+            row.style.border = '1px solid ' + (e.is_valid ? '#e2e8f0' : '#fecdd3');
+            row.style.borderLeft = '4px solid ' + (e.is_valid ? '#10b981' : '#f43f5e');
+            row.style.borderRadius = '6px';
+            row.style.padding = '10px 14px';
+            row.style.fontSize = '14px';
+
+            const scoreTag = e.is_valid 
+              ? `<span style="background: #10b981; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">✅ 得分 +${e.step_score}分</span>`
+              : `<span style="background: #ef4444; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">❌ 扣分 +${e.step_score}分</span>`;
+
+            row.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 600; color: #334155;">第 ${e.step_index} 步判定</span>
+                ${scoreTag}
+              </div>
+              <div class="math-render" style="margin-bottom: 6px; color: #1e293b;">${escapeHtml(e.raw_text)}</div>
+              <div style="color: ${e.is_valid ? '#059669' : '#b91c1c'}; font-size: 13px;">💬 <strong>批改评语：</strong>${escapeHtml(e.feedback)}</div>
+            `;
+            gradeStepsList.appendChild(row);
+          });
+
+          const stdList = report.standard_solution_steps || [];
+          const stdBox = document.getElementById('std-solution-box');
+          const stdContent = document.getElementById('std-solution-content');
+          if (stdList.length > 0) {
+            stdBox.style.display = 'block';
+            stdContent.innerHTML = stdList.map((st, i) => `<div class="math-render" style="margin-bottom: 6px;">${i+1}. ${st}</div>`).join('');
+          } else {
+            stdBox.style.display = 'none';
+          }
+
+          if (typeof renderMathInElement === 'function') {
+            renderMathInElement(panel, {
+              delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+            });
+          }
+
+          gradingPanel.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (err) {
+          alert('拍照批改出错: ' + err.message);
+        } finally {
+          directGradeBtn.disabled = false;
+          submitBtn.disabled = false;
+          gradeSpinner.style.display = 'none';
+          gradeBtnText.textContent = '🚀 拍照直接一键批改';
+        }
+      }
+
+      async function startOcr() {
+        if (!currentFile) return;
+
+        submitBtn.disabled = true;
+        if (directGradeBtn) directGradeBtn.disabled = true;
+        btnSpinner.style.display = 'inline-block';
+        btnText.textContent = '正在识别中...';
+
+        const formData = new FormData();
+        formData.append('image', currentFile, currentFile.name || 'photo.png');
+
+        const selectedEngine = document.querySelector('input[name="ocr_engine"]:checked')?.value || 'PaddlePaddle/PaddleOCR-VL-1.5';
+        formData.append('question', selectedEngine);
+
+        const startTime = performance.now();
+        try {
+          const resp = await fetch('/api/ocr_test', {
+            method: 'POST',
+            body: formData
+          });
+          const data = await resp.json();
+          const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+
+          if (!resp.ok) {
+            alert('识别失败: ' + (data.error || '未知错误'));
+            return;
+          }
+
+          document.getElementById('empty-state').style.display = 'none';
+          document.getElementById('result-content').style.display = 'block';
+
+          const engineDisplay = (data.model_used || selectedEngine).includes('Paddle') ? 'PaddleOCR-VL-1.5' : 'DeepSeek-OCR';
+          document.getElementById('meta-engine').textContent = engineDisplay;
+          document.getElementById('meta-time').textContent = data.elapsed_seconds || elapsed;
+          document.getElementById('meta-chars').textContent = data.char_count || data.text.length;
+          document.getElementById('meta-lines').textContent = data.lines ? data.lines.length : 1;
+          document.getElementById('result-text').value = data.text;
+
+          // 自动平滑隐藏旧的纠错面板，等待用户点击纠错
+          document.getElementById('norm-panel').style.display = 'none';
+
+        } catch (err) {
+          alert('请求出错: ' + err.message);
+        } finally {
+          submitBtn.disabled = false;
+          if (directGradeBtn) directGradeBtn.disabled = false;
+          btnSpinner.style.display = 'none';
+          btnText.textContent = '🔍 仅 OCR 识别';
+        }
+      }
+
+      async function normalizeOcr() {
+        const rawText = document.getElementById('result-text').value.trim();
+        if (!rawText) {
+          alert('请先完成 OCR 识别或在文本框中输入内容。');
+          return;
+        }
+
+        const normBtn = document.getElementById('btn-norm');
+        normBtn.disabled = true;
+        normBtn.textContent = '⏳ AI 正在语义纠错与拆解步骤...';
+
+        try {
+          const resp = await fetch('/api/normalize_ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ raw_text: rawText })
+          });
+          const data = await resp.json();
+          if (!resp.ok) {
+            alert('语义纠错失败: ' + (data.error || '未知错误'));
+            return;
+          }
+
+          // 存储当前规范化数据供智能批改使用
+          window.currentNormalizedData = data;
+
+          // 渲染纠错结果面板
+          const panel = document.getElementById('norm-panel');
+          panel.style.display = 'block';
+
+          // 自动隐藏旧批改结果
+          const gradingPanel = document.getElementById('grading-panel');
+          if (gradingPanel) gradingPanel.style.display = 'none';
+
+          document.getElementById('norm-summary').innerHTML = '<strong>💡 整体分析与疑点总结：</strong><br>' + escapeHtml(data.overall_summary || data.overall_corrections_summary);
+          document.getElementById('norm-stem').innerHTML = escapeHtml(data.question_stem);
+
+          const stepsList = document.getElementById('norm-steps');
+          stepsList.innerHTML = '';
+
+          data.steps.forEach((step, idx) => {
+            const card = document.createElement('div');
+            card.className = 'norm-step-card';
+            card.id = 'step-card-' + step.step_number;
+
+            const markerBadge = step.marker === 'because' 
+              ? '<span class="badge-marker badge-because">∵ 因为 (前提)</span>'
+              : (step.marker === 'therefore' 
+                  ? '<span class="badge-marker badge-therefore">∴ 所以 (推导结论)</span>' 
+                  : '<span class="badge-marker badge-none">说明</span>');
+
+            let formatNoteHtml = '';
+            if (step.format_fix_note) {
+              formatNoteHtml = `<div class="step-correction-note">🔧 <strong>格式修正：</strong>${escapeHtml(step.format_fix_note)}</div>`;
+            }
+
+            let discontinuityHtml = '';
+            if (step.has_discontinuity) {
+              const fixSuggestionEsc = escapeHtml(step.ocr_fix_suggestion);
+              discontinuityHtml = `
+                <div class="discontinuity-card" id="discontinuity-box-${step.step_number}">
+                  <div class="discontinuity-title">
+                    <span>🚨 检测到【代数断裂 / 疑似漏写未知数】</span>
+                  </div>
+                  <div class="discontinuity-pedagogy">
+                    <strong>📌 教学诊断（若卷面确实漏写）：</strong><br>
+                    ${escapeHtml(step.pedagogical_warning)}
+                  </div>
+                  <div class="discontinuity-ocr">
+                    <span><strong>🔍 OCR 疑点核对（若有写）：</strong>建议补正为 \\( ${fixSuggestionEsc} \\)</span>
+                    <button class="btn-quick-fix" onclick="applyQuickFix(${step.step_number}, '${fixSuggestionEsc.replace(/'/g, "\\'")}')">👉 点击一键补正此式</button>
+                  </div>
+                </div>
+              `;
+            }
+
+            card.innerHTML = `
+              <div class="norm-step-header">
+                <span style="font-weight: 600; color: #334155;">第 ${step.step_number} 步 · <span style="font-weight: normal; color: #64748b;">${escapeHtml(step.step_intent)}</span></span>
+                ${markerBadge}
+              </div>
+              <div class="step-content math-render" id="step-content-${step.step_number}">${escapeHtml(step.step_text || step.formatted_text)}</div>
+              ${formatNoteHtml}
+              ${discontinuityHtml}
+            `;
+            stepsList.appendChild(card);
+          });
+
+          // 调用 KaTeX 渲染数学公式
+          if (typeof renderMathInElement === 'function') {
+            renderMathInElement(panel, {
+              delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+            });
+          }
+
+          panel.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (err) {
+          alert('网络错误: ' + err.message);
+        } finally {
+          normBtn.disabled = false;
+          normBtn.textContent = '✨ 数学语义纠错与步骤拆解';
+        }
+      }
+
+      function applyQuickFix(stepNum, correctedLatex) {
+        // 同步更新本地规范化步骤数据
+        if (window.currentNormalizedData && window.currentNormalizedData.steps) {
+          const target = window.currentNormalizedData.steps.find(s => s.step_number === stepNum);
+          if (target) {
+            target.has_discontinuity = false;
+            target.step_text = `又 \\( f\\left(\\frac{1}{2}\\right) = ${correctedLatex} = \\frac{2}{5} \\)`;
+          }
+        }
+
+        const contentElem = document.getElementById('step-content-' + stepNum);
+        const boxElem = document.getElementById('discontinuity-box-' + stepNum);
+        if (contentElem) {
+          contentElem.innerHTML = `又 \\( f\\left(\\frac{1}{2}\\right) = ${correctedLatex} = \\frac{2}{5} \\)`;
+          if (typeof renderMathInElement === 'function') {
+            renderMathInElement(contentElem, {
+              delimiters: [
+                {left: '\\(', right: '\\)', display: false},
+                {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+            });
+          }
+        }
+        if (boxElem) {
+          boxElem.style.background = '#f0fdf4';
+          boxElem.style.borderColor = '#86efac';
+          boxElem.style.borderLeftColor = '#16a34a';
+          boxElem.innerHTML = `<span style="color: #15803d; font-weight: 600;">✅ 已成功补正为标准代数算式：\\( ${escapeHtml(correctedLatex)} \\)</span>`;
+          if (typeof renderMathInElement === 'function') {
+            renderMathInElement(boxElem, {
+              delimiters: [{left: '\\(', right: '\\)', display: false}],
+              throwOnError: false
+            });
+          }
+        }
+      }
+
+      async function gradeCurrentSteps() {
+        if (!window.currentNormalizedData || !window.currentNormalizedData.steps) {
+          alert('请先完成步骤拆解后再进行智能批改。');
+          return;
+        }
+
+        const gradeBtn = document.getElementById('btn-grade');
+        gradeBtn.disabled = true;
+        gradeBtn.textContent = '⏳ AI & SymPy 正在智能判卷与符号证明...';
+
+        try {
+          const resp = await fetch('/api/grade_steps', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              question_stem: window.currentNormalizedData.question_stem,
+              steps: window.currentNormalizedData.steps
+            })
+          });
+          const report = await resp.json();
+          if (!resp.ok) {
+            alert('批改失败: ' + (report.error || '未知错误'));
+            return;
+          }
+
+          const gradingPanel = document.getElementById('grading-panel');
+          gradingPanel.style.display = 'block';
+
+          // 1. 分数徽章与总评
+          const scoreBadge = document.getElementById('grade-score-badge');
+          const isCorrect = report.overall_verdict === 'CORRECT';
+          const isPartial = report.overall_verdict === 'PARTIALLY_CORRECT';
+
+          if (isCorrect) {
+            scoreBadge.style.background = '#dcfce7';
+            scoreBadge.style.color = '#15803d';
+            scoreBadge.textContent = `🎯 满分 ${report.total_score} / ${report.max_total_score} 分 (全部正确)`;
+          } else if (isPartial) {
+            scoreBadge.style.background = '#fef3c7';
+            scoreBadge.style.color = '#b45309';
+            scoreBadge.textContent = `⚠️ 得分 ${report.total_score} / ${report.max_total_score} 分 (部分得分)`;
+          } else {
+            scoreBadge.style.background = '#fee2e2';
+            scoreBadge.style.color = '#b91c1c';
+            scoreBadge.textContent = `❌ 得分 ${report.total_score} / ${report.max_total_score} 分 (存在严重错误)`;
+          }
+
+          // 2. 首错警示框
+          const errBox = document.getElementById('first-error-box');
+          if (report.first_error_step_index) {
+            errBox.style.display = 'block';
+            errBox.innerHTML = `<strong>🚨 首处失分定位：第 ${report.first_error_step_index} 步出现错误！</strong><br>该步骤推导未通过符号代数等价性或存在关键未知数遗漏，后续推导结论受到连带影响。`;
+          } else {
+            errBox.style.display = 'none';
+          }
+
+          // 3. 名师总评
+          document.getElementById('grade-summary-box').innerHTML = escapeHtml(report.summary_feedback);
+
+          // 4. 逐小步得分明细
+          const stepsContainer = document.getElementById('grade-steps-list');
+          stepsContainer.innerHTML = '';
+          (report.steps_evaluation || []).forEach(e => {
+            const row = document.createElement('div');
+            row.style.background = e.is_valid ? '#f8fafc' : '#fff1f2';
+            row.style.border = '1px solid ' + (e.is_valid ? '#e2e8f0' : '#fecdd3');
+            row.style.borderLeft = '4px solid ' + (e.is_valid ? '#10b981' : '#f43f5e');
+            row.style.borderRadius = '6px';
+            row.style.padding = '10px 14px';
+            row.style.fontSize = '14px';
+
+            const scoreTag = e.is_valid 
+              ? `<span style="background: #10b981; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">✅ 得分 +${e.step_score}分</span>`
+              : `<span style="background: #ef4444; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 12px;">❌ 扣分 +${e.step_score}分</span>`;
+
+            row.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-weight: 600; color: #334155;">第 ${e.step_index} 步判定</span>
+                ${scoreTag}
+              </div>
+              <div class="math-render" style="margin-bottom: 6px; color: #1e293b;">${escapeHtml(e.raw_text)}</div>
+              <div style="color: ${e.is_valid ? '#059669' : '#b91c1c'}; font-size: 13px;">💬 <strong>批改评语：</strong>${escapeHtml(e.feedback)}</div>
+            `;
+            stepsContainer.appendChild(row);
+          });
+
+          // 5. 标准满分参考解答
+          const stdList = report.standard_solution_steps || [];
+          const stdBox = document.getElementById('std-solution-box');
+          const stdContent = document.getElementById('std-solution-content');
+          if (stdList.length > 0) {
+            stdBox.style.display = 'block';
+            stdContent.innerHTML = stdList.map((st, i) => `<div class="math-render" style="margin-bottom: 6px;">${i+1}. ${st}</div>`).join('');
+          } else {
+            stdBox.style.display = 'none';
+          }
+
+          // KaTeX 重新渲染
+          if (typeof renderMathInElement === 'function') {
+            renderMathInElement(gradingPanel, {
+              delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+            });
+          }
+
+          gradingPanel.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (err) {
+          alert('智能批改请求出错: ' + err.message);
+        } finally {
+          gradeBtn.disabled = false;
+          gradeBtn.textContent = '🎯 一键智能做题批改 (AI & SymPy 符号代数判卷)';
+        }
+      }
+
+      function copyResult() {
+        const text = document.getElementById('result-text').value;
+        navigator.clipboard.writeText(text).then(() => {
+          alert('已复制到剪贴板！');
+        });
+      }
+
+      function openRenderTab() {
+        const text = document.getElementById('result-text').value.trim();
+        if (!text) {
+          alert('当前没有可渲染的识别结果。');
+          return;
+        }
+
+        const imgSrc = (previewBox.style.display !== 'none' && previewImage.src) ? previewImage.src : '';
+        const lines = text.split('\n');
+        
+        // 生成漂亮的段落结构
+        let formattedContent = '';
+        for (let line of lines) {
+          let trimmed = line.trim();
+          if (!trimmed) {
+            formattedContent += '<div class="spacer"></div>';
+          } else {
+            formattedContent += `<p class="math-line">${escapeHtml(trimmed)}</p>`;
+          }
+        }
+
+        const katexConfigJson = JSON.stringify({
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$', right: '$', display: false}
+          ],
+          throwOnError: false
+        });
+
+        const htmlContent = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>📐 数学公式与解题步骤渲染</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"><\/script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"><\/script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --bg: #f1f5f9;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.8;
+      padding: 36px 16px;
+    }
+    .wrapper {
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      padding: 7px 14px;
+      font-size: 13.5px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-primary:hover { background: #1d4ed8; }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 36px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+      font-size: 17px;
+    }
+    .math-line {
+      margin-bottom: 12px;
+      word-break: break-word;
+    }
+    .spacer {
+      height: 14px;
+    }
+    .katex {
+      font-size: 1.12em;
+    }
+    .img-preview-box {
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #f8fafc;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      text-align: center;
+    }
+    .img-preview-box img {
+      max-width: 100%;
+      max-height: 360px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .header, .img-preview-box { display: none; }
+      .card { border: none; box-shadow: none; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>📐 手写数学公式渲染预览</h1>
+      <div class="btn-group">
+        <button class="btn" onclick="toggleOriginalImage()">🖼️ 显示/隐藏原图</button>
+        <button class="btn btn-primary" onclick="window.print()">🖨️ 打印 / 保存 PDF</button>
+      </div>
+    </div>
+
+    ${imgSrc ? `
+    <div class="img-preview-box" id="img-box" style="display: none;">
+      <p style="font-size: 13px; color: #64748b; margin-bottom: 8px;">【手写原图参考】</p>
+      <img src="${imgSrc}" alt="手写原图">
+    </div>
+    ` : ''}
+
+    <div class="card" id="math-render-root">
+      ${formattedContent}
+    </div>
+  </div>
+
+  <script>
+    const config = ${katexConfigJson};
+    function doRender() {
+      if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.getElementById('math-render-root'), config);
+      }
+    }
+    function toggleOriginalImage() {
+      const box = document.getElementById('img-box');
+      if (box) {
+        box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', doRender);
+    } else {
+      doRender();
+    }
+    window.addEventListener('load', doRender);
+    setTimeout(doRender, 100);
+    setTimeout(doRender, 500);
+  <\/script>
+</body>
+</html>`;
+
+        const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const newWindow = window.open(blobUrl, '_blank');
+        if (!newWindow) {
+          alert('请允许浏览器弹出新标签页窗口！');
+        }
+      }
+
+      function escapeHtml(str) {
+        return str
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+    </script>
+  </body>
+</html>
