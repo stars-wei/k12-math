@@ -289,6 +289,9 @@ def make_handler(password: str, url: str):
                     item_results.append(ProblemItemOutcome(label, problem, outcomes))
                 self.send_html(render_problem_items(question, item_results))
             except Exception as error:
+                import traceback
+                print(f"❌ [ERROR] {self.path} 处理失败: {error}", flush=True)
+                traceback.print_exc()
                 if self.path.startswith("/api/"):
                     self.send_json({"error": friendly_message(error)}, status=400)
                 else:
