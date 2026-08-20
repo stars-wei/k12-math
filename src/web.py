@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+import sys
 from email.parser import BytesParser
 from email.policy import default
 from getpass import getpass
