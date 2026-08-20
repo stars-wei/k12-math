@@ -2,7 +2,7 @@
 
 一个图谱驱动、可解释的 K12 数学求解原型：从 Neo4j `math` 图谱读取 Task、Strategy 和 Operation，使用注册过的 SymPy 操作执行策略路径，并输出经过验证的解题步骤。
 
-`src/templates/result.html` 是页面源模板；每次求解生成的 `result.html` 是浏览器打开的结果文件。
+`src/templates/studio.html` 是唯一的 Web 交互界面；`src/templates/result.html` 仅用于命令行生成静态解题报告。
 
 `src/operation_registry.py` 将 Neo4j 的 `Operation.id` 映射到受信任的 SymPy 操作实现。
 
@@ -56,7 +56,7 @@ python src/solve.py `
 
 ## 复合题目
 
-网页会先识别题目中的全部题型，再逐项检查 Neo4j 中是否存在完整的可执行策略。一个题目可以同时包含多个要求；已入库的题型会执行策略，未找到可执行策略的题型会明确说明“本次未输出这部分答案”，不会影响其他题型继续求解。相同函数的顶点、对称轴和最值会复用已验证的中间事实，避免重复计算。
+图谱编排层会先识别题目中的全部题型，再逐项检查 Neo4j 中是否存在完整的可执行策略。一个题目可以同时包含多个要求；已入库的题型会执行策略，未找到可执行策略的题型会明确说明“本次未输出这部分答案”，不会影响其他题型继续求解。相同函数的顶点、对称轴和最值会复用已验证的中间事实，避免重复计算。
 
 当前识别目录包括：
 
@@ -84,7 +84,7 @@ python src/solve.py `
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
-# 网页输入
+## 数学学习工作台
 
 在 PowerShell 中运行：
 
@@ -92,9 +92,9 @@ python -m unittest discover -s tests -v
 python src/web.py
 ```
 
-输入 Neo4j 密码后，打开 `http://127.0.0.1:8000`。网页可输入完整题干，也可上传 PNG/JPEG/WEBP 题目图片（最大 10 MB）。图片会先由 SiliconFlow 的 DeepSeek-OCR 转写，用户确认或修改题干后，DeepSeek 再提取 SymPy 表达式，并从 Neo4j 返回的候选 Task 与可执行 Strategy 中选择；选择结果和表达式都会由图谱与 SymPy 校验。
+打开 `http://127.0.0.1:8000`。系统只提供一个响应式工作台，可通过文字或 PNG/JPEG/WEBP 图片（最大 10 MB）提交题目，并选择自动、批改或求解三种处理模式。图片输入会先由 SiliconFlow OCR 转写，OCR 原文可在结果页折叠查看。
 
-启动网页前，请确认 `.env` 已填写 `DEEPSEEK_API_KEY`；只有使用截图识别时才需要 `SILICONFLOW_API_KEY`。
+启动工作台前，请确认 `.env` 已填写 `DEEPSEEK_API_KEY`；使用图片输入时还需要 `SILICONFLOW_API_KEY`。工作台中的 AI 参考解答尚未经过知识图谱与 SymPy 的完整验证，页面会明确标注这一边界。
 
 可输入的完整题干例如：
 

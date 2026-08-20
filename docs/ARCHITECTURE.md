@@ -1,6 +1,6 @@
 # 架构概述
 
-本文档旨在帮助开发者与智能体快速、准确地理解 `k12-math` v0.1 的代码架构。文档描述的是截至 2026-08-15 仓库中已经存在的实现；尚未落地的设想统一放在“未来规划”中，不将其表述为现有能力。当组件边界、数据归属、外部集成、部署方式或安全假设发生变化时，应同步更新本文档。
+本文档旨在帮助开发者与智能体快速、准确地理解 `k12-math` v0.1 的代码架构。文档描述的是截至 2026-08-20 仓库中已经存在的实现；尚未落地的设想统一放在“未来规划”中，不将其表述为现有能力。当组件边界、数据归属、外部集成、部署方式或安全假设发生变化时，应同步更新本文档。
 
 ## 1. 项目结构
 
@@ -18,9 +18,8 @@ math-v0.1/
 │   ├── operation_registry.py  # Operation ID 到 Python 处理器的可信映射
 │   ├── solve.py               # Neo4j 加载、SymPy 执行与结果渲染
 │   └── templates/
-│       ├── input.html         # 题目文本输入与图片上传页
-│       ├── confirm.html       # OCR 结果确认与修正页
-│       └── result.html        # 解题结果 HTML 模板
+│       ├── studio.html        # 唯一的 Web 交互工作台
+│       └── result.html        # 命令行静态解题报告模板
 ├── tests/
 │   ├── test_classifier.py     # 任务路由测试
 │   ├── test_multi_solver.py   # 复合题与多小题测试
@@ -43,11 +42,11 @@ math-v0.1/
 - `solve.py` 和 `operation_registry.py` 负责可信的数学执行；
 - `deepseek_client.py` 和 `ocr_client.py` 负责访问外部模型；
 - `problem.py` 定义数据契约；
-- `src/templates/` 负责结果展示。
+- `src/templates/studio.html` 负责 Web 输入与结果展示，`result.html` 负责命令行静态报告。
 
 ## 2. 高层系统架构图
 
-系统同时支持命令行直接解题和浏览器辅助解题，两条路径最终汇合到同一套“知识图谱驱动的符号求解器”。
+系统同时保留命令行图谱求解与浏览器学习工作台。命令行路径使用 Neo4j 和 SymPy 生成经过验证的静态报告；工作台路径负责 OCR、AI 参考解答和作答批改，两条路径当前尚未统一为同一套验证链路。
 
 ```mermaid
 flowchart TD
@@ -56,30 +55,33 @@ flowchart TD
     Browser["浏览器"]
     Web["本地 HTTP 服务：web.py"]
     OCR["OCR 客户端"]
-    Extract["DeepSeek 客户端"]
-    Router["分类器与多任务求解器"]
+    DeepSeek["DeepSeek 客户端"]
+    Grader["作答批改器"]
+    Router["图谱分类器与多任务求解器"]
     Graph["Neo4j math 知识图谱"]
     Registry["可信 Operation 注册表"]
     SymPy["SymPy 符号执行"]
-    HTML["生成 result.html"]
-    MathJax["MathJax CDN"]
+    Report["生成 result.html"]
+    Studio["studio.html 单页工作台"]
+    KaTeX["KaTeX CDN"]
 
     User -->|表达式与 Task| CLI
     User -->|题目文本或图片| Browser
-    Browser --> Web
+    Browser --> Studio
+    Studio <--> Web
     Web -->|图片| OCR
-    OCR -->|待确认文本| Web
-    Web --> Extract
-    Extract -->|结构化表达式| Router
+    OCR --> Web
+    Web --> DeepSeek
+    Web --> Grader
+    DeepSeek --> Grader
     Router <--> Graph
     Router --> Registry
     CLI <--> Graph
     CLI --> Registry
     Registry --> SymPy
-    SymPy --> HTML
-    Router --> HTML
-    HTML --> MathJax
-    HTML --> Browser
+    SymPy --> Report
+    Router --> Report
+    Studio --> KaTeX
 ```
 
 关键边界如下：
@@ -96,18 +98,13 @@ flowchart TD
 
 **名称：** 本地浏览器界面
 
-**职责：** 提供由服务端渲染的三阶段交互流程：输入完整题目或上传图片、确认 OCR 识别文本、查看分组后的解题结果。前端有意保持无框架设计，通过服务端生成 HTML 和标准表单提交完成交互，不需要单独构建 SPA。
+**职责：** 通过单一响应式工作台接收文字或图片题目，选择自动、批改或求解模式，并在同一页面展示题干、步骤、评分和折叠的 OCR 原文。批改反馈区分通过、通过但建议补充、无法确认和未通过四种状态。
 
-**技术栈：** HTML、CSS、Python 模板替换、浏览器原生表单，以及用于渲染 LaTeX 的 MathJax。
+**技术栈：** HTML、CSS、浏览器原生 JavaScript、Fetch API，以及用于渲染 LaTeX 的 KaTeX。
 
 **部署方式：** 由 Python `ThreadingHTTPServer` 在 `http://127.0.0.1:8000` 提供本地服务。生成的解题结果也可以直接以本地 `result.html` 文件打开。
 
-**相关源码：**
-
-- `src/templates/input.html`；
-- `src/templates/confirm.html`；
-- `src/templates/result.html`；
-- `src/web.py`、`src/multi_solver.py` 和 `src/solve.py` 中的渲染辅助函数。
+**相关源码：** `src/templates/studio.html` 和 `src/web.py`。命令行静态报告另由 `src/templates/result.html` 和 `src/solve.py` 生成。
 
 ### 3.2. 后端服务
 
@@ -117,9 +114,9 @@ flowchart TD
 
 **名称：** 本地 Web 入口
 
-**职责：** 接收题目文本或上传图片，限制上传体积，解析多部分表单，要求用户确认 OCR 结果，规范化本地小题编号，并协调题目提取与解题结果渲染。
+**职责：** 提供单一工作台页面和 JSON 接口，接收题目文本或图片，限制上传体积，解析多部分表单，并协调 OCR、AI 参考解答与作答批改。
 
-**技术栈：** Python 标准库 `http.server`、`email.parser`、`urllib.parse`，以及 HTML 转义。
+**技术栈：** Python 标准库 `http.server`、`email.parser` 和 JSON 编解码。
 
 **部署方式：** 运行 `python src/web.py` 后，作为本地工作站上的进程内模块提供服务。
 
@@ -177,7 +174,7 @@ flowchart TD
 
 **名称：** SiliconFlow OCR 适配器
 
-**职责：** 校验图片媒体类型，将内存中的上传内容编码为 Base64，发送至 SiliconFlow DeepSeek-OCR 接口，并返回纯文本识别结果，供用户确认或修正。
+**职责：** 校验图片媒体类型，将内存中的上传内容编码为 Base64，发送至 SiliconFlow DeepSeek-OCR 接口，并返回纯文本识别结果，供统一工作台继续规范化、批改或求解。
 
 **技术栈：** Python 标准库 HTTP 客户端、Base64、JSON、SiliconFlow REST API。
 
@@ -394,15 +391,15 @@ python -m unittest discover -s tests -v
 
 **架构版本：** v0.1
 
-**代码仓库：** https://github.com/stars-wei/k12-math
+**代码仓库：** https://github.com/starswei/k12-math
 
 **主分支：** `main`
 
-**主要负责人：** stars-wei / 独立开发者
+**主要负责人：** starswei / 独立开发者
 
 **项目定位：** 基于知识图谱、结果可验证的 K12 数学求解器原型，也是未来“伴学”系统的数学解题模块。
 
-**最后更新日期：** 2026-08-15
+**最后更新日期：** 2026-08-20
 
 ## 11. 术语与缩略语
 
