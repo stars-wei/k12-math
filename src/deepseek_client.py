@@ -466,6 +466,22 @@ class DeepSeekClient:
                                         "只提供一套 OCR 时输出 not_checked"
                                     ),
                                 },
+                                "ocr_comparison_status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "exact_match",
+                                        "compatible_omission",
+                                        "semantic_conflict",
+                                        "unaligned",
+                                        "not_checked",
+                                    ],
+                                    "description": (
+                                        "两套 OCR 的数学关系：内容完整一致为 exact_match；"
+                                        "一套仅省略中间内容、共同断言均一致为 compatible_omission；"
+                                        "同一位置出现相互矛盾的变量、系数、符号、表达式或结论为 semantic_conflict；"
+                                        "无法可靠对应为 unaligned；只提供一套 OCR 为 not_checked"
+                                    ),
+                                },
                                 "secondary_ocr_evidence": {
                                     "type": "string",
                                     "description": (
@@ -505,6 +521,7 @@ class DeepSeekClient:
                                 "continuity_status",
                                 "mathematical_validity",
                                 "ocr_agreement",
+                                "ocr_comparison_status",
                                 "secondary_ocr_evidence",
                                 "verification_message",
                                 "omitted_reasoning",
@@ -533,12 +550,16 @@ class DeepSeekClient:
                 "4. logical_break：即使补充合理的常规代数变形，当前结论仍然无法从前面的有效步骤推出，"
                 "或者使用了错误的运算、性质、公式或定理。\n"
                 "【双 OCR 证据规则】：如果同时提供主 OCR 与复核 OCR，请逐步比较数学实质。"
-                "两套 OCR 对会影响数学含义的变量、符号、系数或表达式识别不一致时，"
-                "ocr_agreement 必须输出 disagree，continuity_status 必须输出 ambiguous，"
-                "mathematical_validity 必须输出 unknown，不得将其中任意一套直接视为学生原文扣分。"
-                "无法可靠对齐对应步骤时输出 uncertain，并同样使用 ambiguous 与 unknown。"
-                "只有数学实质一致时才能输出 agree，并继续判断 valid 或 invalid。"
-                "只提供一套 OCR 时输出 not_checked。\n"
+                "这里的一致是数学相容，不要求两套文本覆盖范围完全相同。"
+                "如果一套 OCR 给出完整的 A=B=C，另一套只识别出 A=C，且共同出现的前提、等式和结论均一致，"
+                "应输出 ocr_comparison_status=compatible_omission、ocr_agreement=agree；"
+                "不得仅因复核 OCR 省略中间算式而输出 disagree 或 uncertain。"
+                "只有两套 OCR 在同一位置都给出了数学断言，并且变量、符号、系数、表达式或结论相互矛盾时，"
+                "才输出 semantic_conflict 与 disagree，并使用 ambiguous 与 unknown。"
+                "无法可靠对齐对应步骤时输出 unaligned 与 uncertain，并同样使用 ambiguous 与 unknown。"
+                "完整一致时输出 exact_match 与 agree；只提供一套 OCR 时两个字段均输出 not_checked。"
+                "verification_message 的说明必须与结构化枚举一致，不得一面说明‘数学实质一致’，"
+                "一面输出 disagree 或 semantic_conflict。\n"
                 "【KaTeX 输出规范】：step_text、omitted_reasoning、diagnostic_message 和 overall_summary 中，"
                 "普通说明使用中文；所有数学表达式、变量和数学符号必须使用 KaTeX 支持的 LaTeX。"
                 "行内公式统一用 \\( 与 \\) 包裹，独立公式用 \\[ 与 \\] 包裹；"
@@ -555,16 +576,36 @@ class DeepSeekClient:
         )
         dual_ocr = bool(secondary_ocr_text)
         for step in result.get("steps", []):
-            agreement = step.get("ocr_agreement", "not_checked")
-            if dual_ocr and agreement == "not_checked":
-                agreement = "uncertain"
-                step["ocr_agreement"] = agreement
-                step["verification_message"] = (
-                    step.get("verification_message")
-                    or "已提供两套 OCR，但模型未完成可靠对齐。"
-                )
-            elif not dual_ocr:
+            comparison_status = step.get("ocr_comparison_status")
+            if not dual_ocr:
+                step["ocr_comparison_status"] = "not_checked"
                 step["ocr_agreement"] = "not_checked"
+                agreement = "not_checked"
+            elif comparison_status in {"exact_match", "compatible_omission"}:
+                step["ocr_agreement"] = "agree"
+                agreement = "agree"
+            elif comparison_status == "semantic_conflict":
+                step["ocr_agreement"] = "disagree"
+                agreement = "disagree"
+            elif comparison_status == "unaligned":
+                step["ocr_agreement"] = "uncertain"
+                agreement = "uncertain"
+            else:
+                # Backward-compatible fallback for older or incomplete model
+                # responses. A dual-OCR request must never remain not_checked.
+                agreement = step.get("ocr_agreement", "not_checked")
+                if agreement == "agree":
+                    step["ocr_comparison_status"] = "exact_match"
+                elif agreement == "disagree":
+                    step["ocr_comparison_status"] = "semantic_conflict"
+                else:
+                    step["ocr_comparison_status"] = "unaligned"
+                    step["ocr_agreement"] = "uncertain"
+                    agreement = "uncertain"
+                    step["verification_message"] = (
+                        step.get("verification_message")
+                        or "已提供两套 OCR，但模型未完成可靠对齐。"
+                    )
 
             if agreement in {"disagree", "uncertain"}:
                 step["continuity_status"] = "ambiguous"

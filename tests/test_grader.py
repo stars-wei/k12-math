@@ -250,6 +250,55 @@ class TestGrader(unittest.TestCase):
         self.assertIn(r"\(a=1\)", feedback)
         self.assertIn(r"\( \frac{2a}{5}=\frac{2}{5} \)", feedback)
 
+    def test_full_score_with_advisory_step_is_overall_correct(self):
+        """A full-score advisory step cannot downgrade the overall verdict."""
+        from grader import grade_normalized_steps
+
+        stem = r"已知函数 \(f(x)=\frac{ax+b}{1+x^2}\) 是定义在 \((-1,1)\) 上的奇函数，且 \(f\left(\frac12\right)=\frac25\)，求函数 \(f(x)\) 的解析式。"
+        steps = [
+            {
+                "step_number": 1,
+                "marker": "because",
+                "step_text": r"\(f(x)\) 是定义在 \((-1,1)\) 上的奇函数。",
+                "continuity_status": "complete",
+                "mathematical_validity": "valid",
+            },
+            {
+                "step_number": 2,
+                "marker": "therefore",
+                "step_text": r"\(f(0)=0\)，即 \(\frac{b}{1+0^2}=0\)，∴ \(b=0\)。",
+                "continuity_status": "complete",
+                "mathematical_validity": "valid",
+            },
+            {
+                "step_number": 3,
+                "marker": "therefore",
+                "step_text": r"\(f\left(\frac12\right)=\frac{\frac12a}{1+\frac14}=\frac25\)，∴ \(a=1\)。",
+                "continuity_status": "acceptable_omission",
+                "mathematical_validity": "valid",
+                "omitted_reasoning": r"\(\frac{2a}{5}=\frac25\)，故 \(a=1\)。",
+                "diagnostic_message": "省略了常规约分和方程求解过程。",
+            },
+            {
+                "step_number": 4,
+                "marker": "therefore",
+                "step_text": r"\(f(x)=\frac{x}{1+x^2}\)。",
+                "continuity_status": "complete",
+                "mathematical_validity": "valid",
+            },
+        ]
+
+        result = grade_normalized_steps(stem, steps)
+
+        self.assertEqual(result["total_score"], 8)
+        self.assertEqual(result["max_total_score"], 8)
+        self.assertEqual(result["overall_verdict"], "CORRECT")
+        self.assertIsNone(result["first_error_step_index"])
+        self.assertEqual(
+            result["steps_evaluation"][2]["evaluation_status"],
+            "passed_with_note",
+        )
+
     def test_ambiguous_ocr_step_requires_review_without_direct_deduction(self):
         """Unreadable OCR produces a review state instead of an automatic error."""
         from grader import grade_normalized_steps

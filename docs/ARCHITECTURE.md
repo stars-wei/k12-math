@@ -380,7 +380,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 python -m unittest discover -s tests -v
 ```
 
-截至 2026-08-20，共发现 54 项测试，现已全部通过。测试范围包括：
+截至 2026-08-20，共发现 57 项测试，现已全部通过。测试范围包括：
 
 - 确定性 Task 路由和模型兜底路由；
 - 多任务识别与不支持任务的结果输出；
