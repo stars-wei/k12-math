@@ -74,6 +74,16 @@ class OcrNormalizationContractTests(unittest.TestCase):
             step_properties["ocr_agreement"]["enum"],
             ["agree", "disagree", "uncertain", "not_checked"],
         )
+        self.assertEqual(
+            step_properties["ocr_comparison_status"]["enum"],
+            [
+                "exact_match",
+                "compatible_omission",
+                "semantic_conflict",
+                "unaligned",
+                "not_checked",
+            ],
+        )
         self.assertIn(
             "每个数学表达式必须分别使用 KaTeX 行内定界符",
             step_properties["secondary_ocr_evidence"]["description"],
@@ -92,6 +102,8 @@ class OcrNormalizationContractTests(unittest.TestCase):
         self.assertIn("不得使用 / 表示分数", system_prompt)
         self.assertIn("不要输出未包裹的 ASCII 算式", system_prompt)
         self.assertIn("双 OCR 证据规则", system_prompt)
+        self.assertIn("不要求两套文本覆盖范围完全相同", system_prompt)
+        self.assertIn("compatible_omission", system_prompt)
 
     def test_dual_ocr_disagreement_is_forced_to_unknown(self) -> None:
         client = object.__new__(DeepSeekClient)
@@ -101,6 +113,7 @@ class OcrNormalizationContractTests(unittest.TestCase):
                 {
                     "step_number": 1,
                     "ocr_agreement": "disagree",
+                    "ocr_comparison_status": "semantic_conflict",
                     "continuity_status": "logical_break",
                     "mathematical_validity": "invalid",
                 }
@@ -121,6 +134,7 @@ class OcrNormalizationContractTests(unittest.TestCase):
                 {
                     "step_number": 1,
                     "ocr_agreement": "not_checked",
+                    "ocr_comparison_status": "not_checked",
                     "continuity_status": "complete",
                     "mathematical_validity": "valid",
                     "verification_message": "",
@@ -133,6 +147,54 @@ class OcrNormalizationContractTests(unittest.TestCase):
 
         step = result["steps"][0]
         self.assertEqual(step["ocr_agreement"], "uncertain")
+        self.assertEqual(step["continuity_status"], "ambiguous")
+        self.assertEqual(step["mathematical_validity"], "unknown")
+
+    def test_compatible_omission_overrides_disagreement_without_downgrading(self) -> None:
+        client = object.__new__(DeepSeekClient)
+        model_result = {
+            "question_stem": "sample",
+            "steps": [
+                {
+                    "step_number": 1,
+                    "ocr_agreement": "disagree",
+                    "ocr_comparison_status": "compatible_omission",
+                    "continuity_status": "acceptable_omission",
+                    "mathematical_validity": "valid",
+                    "verification_message": "复核 OCR 省略中间式，但共同结论一致。",
+                }
+            ],
+            "overall_summary": "sample",
+        }
+        with patch.object(DeepSeekClient, "_tool_call", return_value=model_result):
+            result = client.normalize_ocr_math_steps("A=B=C", "A=C")
+
+        step = result["steps"][0]
+        self.assertEqual(step["ocr_agreement"], "agree")
+        self.assertEqual(step["ocr_comparison_status"], "compatible_omission")
+        self.assertEqual(step["continuity_status"], "acceptable_omission")
+        self.assertEqual(step["mathematical_validity"], "valid")
+
+    def test_semantic_conflict_overrides_agreement_and_forces_unknown(self) -> None:
+        client = object.__new__(DeepSeekClient)
+        model_result = {
+            "question_stem": "sample",
+            "steps": [
+                {
+                    "step_number": 1,
+                    "ocr_agreement": "agree",
+                    "ocr_comparison_status": "semantic_conflict",
+                    "continuity_status": "complete",
+                    "mathematical_validity": "valid",
+                }
+            ],
+            "overall_summary": "sample",
+        }
+        with patch.object(DeepSeekClient, "_tool_call", return_value=model_result):
+            result = client.normalize_ocr_math_steps("f(x)=x", "f(x)=t")
+
+        step = result["steps"][0]
+        self.assertEqual(step["ocr_agreement"], "disagree")
         self.assertEqual(step["continuity_status"], "ambiguous")
         self.assertEqual(step["mathematical_validity"], "unknown")
 

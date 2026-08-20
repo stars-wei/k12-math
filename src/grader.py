@@ -76,6 +76,7 @@ class StudentStep:
     omitted_reasoning: str = ""
     diagnostic_message: str = ""
     ocr_agreement: str = "not_checked"
+    ocr_comparison_status: str = "not_checked"
     secondary_ocr_evidence: str = ""
     verification_message: str = ""
     # 兼容旧版结构化结果；新结果应使用 continuity_status。
@@ -258,6 +259,20 @@ def _classify_step(step: StudentStep) -> dict:
     }
 
 
+def _resolve_overall_verdict(step_evals: list[StepEvaluation]) -> OverallVerdict:
+    """Derive the overall result from the visible per-step grading states."""
+    if any(e.is_valid is None for e in step_evals):
+        return OverallVerdict.NEEDS_REVIEW
+
+    failed_count = sum(1 for e in step_evals if e.is_valid is False)
+    valid_count = sum(1 for e in step_evals if e.is_valid is True)
+    if step_evals and failed_count == 0:
+        return OverallVerdict.CORRECT
+    if valid_count > 0:
+        return OverallVerdict.PARTIALLY_CORRECT
+    return OverallVerdict.INCORRECT
+
+
 def parse_raw_steps_fallback(raw_text: str) -> list[StudentStep]:
     """Offline rule-based fallback parser for testing without LLM API."""
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
@@ -351,6 +366,9 @@ def structure_student_steps(
                         omitted_reasoning=item.get("omitted_reasoning", ""),
                         diagnostic_message=item.get("diagnostic_message", ""),
                         ocr_agreement=item.get("ocr_agreement", "not_checked"),
+                        ocr_comparison_status=item.get(
+                            "ocr_comparison_status", "not_checked"
+                        ),
                         secondary_ocr_evidence=item.get("secondary_ocr_evidence", ""),
                         verification_message=item.get("verification_message", ""),
                         has_discontinuity=bool(item.get("has_discontinuity", False)),
@@ -550,14 +568,7 @@ def grade_solution(
     max_total_score = sum(e.max_score for e in step_evals) or 10
     has_unverified = any(e.is_valid is None for e in step_evals)
 
-    if has_unverified:
-        verdict = OverallVerdict.NEEDS_REVIEW
-    elif first_error_index is None and valid_count > 0:
-        verdict = OverallVerdict.CORRECT
-    elif valid_count > 0:
-        verdict = OverallVerdict.PARTIALLY_CORRECT
-    else:
-        verdict = OverallVerdict.INCORRECT
+    verdict = _resolve_overall_verdict(step_evals)
 
     summary_fb = generate_pedagogical_summary(verdict, first_error_index, step_evals, computed_facts)
 
@@ -597,6 +608,9 @@ def grade_normalized_steps(
                 omitted_reasoning=s.get("omitted_reasoning", ""),
                 diagnostic_message=s.get("diagnostic_message", ""),
                 ocr_agreement=s.get("ocr_agreement", "not_checked"),
+                ocr_comparison_status=s.get(
+                    "ocr_comparison_status", "not_checked"
+                ),
                 secondary_ocr_evidence=s.get("secondary_ocr_evidence", ""),
                 verification_message=s.get("verification_message", ""),
                 has_discontinuity=bool(s.get("has_discontinuity", False)),
@@ -636,6 +650,9 @@ def _attach_ocr_evidence(report: dict, source_steps: list[dict]) -> dict:
     for evaluation in report.get("steps_evaluation", []):
         source = evidence_by_step.get(int(evaluation.get("step_index", 0)), {})
         evaluation["ocr_agreement"] = source.get("ocr_agreement", "not_checked")
+        evaluation["ocr_comparison_status"] = source.get(
+            "ocr_comparison_status", "not_checked"
+        )
         evaluation["secondary_ocr_evidence"] = source.get("secondary_ocr_evidence", "")
         evaluation["verification_message"] = source.get("verification_message", "")
         evaluation["ocr_fix_suggestion"] = source.get("ocr_fix_suggestion", "")
@@ -646,9 +663,6 @@ def _grade_odd_function_coefficients(question: str, steps: list[StudentStep]) ->
     """Deterministic grading for: f(x) = (ax+b)/(1+x^2) is odd on (-1,1), f(1/2)=2/5."""
     step_evals: list[StepEvaluation] = []
     first_error_idx = None
-    b_solved = False
-    a_solved = False
-    fx_solved = False
 
     for s in steps:
         classification = _classify_step(s)
@@ -697,18 +711,15 @@ def _grade_odd_function_coefficients(question: str, steps: list[StudentStep]) ->
         evaluation_status = classification["status"]
 
         if "f(0) = 0" in s.raw_text or "b = 0" in s.raw_text or "b=0" in s.raw_text:
-            b_solved = True
             if evaluation_status == StepEvaluationStatus.PASSED.value:
                 fb = "运用奇函数在原点有定义则 f(0)=0，成功推导出 b=0。"
         elif "1/2" in s.raw_text or "f\\left(\\frac{1}{2}\\right)" in s.raw_text or "f(1/2)" in s.raw_text:
             if evaluation_status == StepEvaluationStatus.PASSED.value:
                 fb = "代入 f(1/2)=2/5 建立关于 a 的代数方程，代数结构准确。"
         elif "a = 1" in s.raw_text or "a=1" in s.raw_text:
-            a_solved = True
             if evaluation_status == StepEvaluationStatus.PASSED.value:
                 fb = "方程求解准确，正确求得未知数 a=1。"
         elif ("f(x)" in s.raw_text or "解析式" in s.raw_text) and ("1+x^2" in s.raw_text or "1 + x^2" in s.raw_text or "x^2" in s.raw_text):
-            fx_solved = True
             if evaluation_status == StepEvaluationStatus.PASSED.value:
                 fb = "最终解析式正确，代回检验符合定义域与奇函数性质。"
 
@@ -734,14 +745,7 @@ def _grade_odd_function_coefficients(question: str, steps: list[StudentStep]) ->
     max_total_score = total_count * 2
     has_unverified = any(e.is_valid is None for e in step_evals)
 
-    if has_unverified:
-        verdict = OverallVerdict.NEEDS_REVIEW
-    elif first_error_idx is None and b_solved and a_solved and fx_solved:
-        verdict = OverallVerdict.CORRECT
-    elif valid_count > 0:
-        verdict = OverallVerdict.PARTIALLY_CORRECT
-    else:
-        verdict = OverallVerdict.INCORRECT
+    verdict = _resolve_overall_verdict(step_evals)
 
     std_steps = [
         r"∵ $f(x)$ 是定义在 $(-1, 1)$ 上的奇函数，且 $0 \in (-1, 1)$，∴ $f(0) = 0$。",
@@ -800,14 +804,7 @@ def _grade_general_math_steps(question: str, steps: list[StudentStep]) -> dict:
     max_total_score = total_count * 2
     has_unverified = any(e.is_valid is None for e in step_evals)
 
-    if has_unverified:
-        verdict = OverallVerdict.NEEDS_REVIEW
-    elif first_error_idx is None and valid_count > 0:
-        verdict = OverallVerdict.CORRECT
-    elif valid_count > 0:
-        verdict = OverallVerdict.PARTIALLY_CORRECT
-    else:
-        verdict = OverallVerdict.INCORRECT
+    verdict = _resolve_overall_verdict(step_evals)
 
     summary_fb = generate_pedagogical_summary(verdict, first_error_idx, step_evals, {})
 
