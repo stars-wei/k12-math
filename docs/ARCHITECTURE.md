@@ -13,7 +13,7 @@ math-v0.1/
 │   ├── multi_solver.py        # 多小题、多任务编排
 │   ├── classifier.py          # 受约束的 Task 与 Strategy 选择
 │   ├── deepseek_client.py     # DeepSeek 结构化输出客户端
-│   ├── ocr_client.py          # SiliconFlow DeepSeek-OCR 客户端
+│   ├── ocr_client.py          # SiliconFlow 双 OCR 客户端
 │   ├── problem.py             # 与传输层无关的数据契约
 │   ├── operation_registry.py  # Operation ID 到 Python 处理器的可信映射
 │   ├── solve.py               # Neo4j 加载、SymPy 执行与结果渲染
@@ -172,15 +172,27 @@ flowchart TD
 
 #### 3.2.6. OCR 服务适配器
 
-**名称：** SiliconFlow OCR 适配器
+**名称：** SiliconFlow 双 OCR 适配器
 
-**职责：** 校验图片媒体类型，将内存中的上传内容编码为 Base64，发送至 SiliconFlow DeepSeek-OCR 接口，并返回纯文本识别结果，供统一工作台继续规范化、批改或求解。
+**职责：** 校验图片媒体类型，将内存中的上传内容编码为 Base64，并行调用 PaddleOCR-VL 主识别模型与 DeepSeek-OCR 复核模型。两套文本共同进入步骤规范化；关键数学内容不一致或无法对齐时，步骤标记为无法确认，不能仅依据该 OCR 结果扣分。复核服务失败时保留主识别结果，并按单 OCR 降级处理。
 
 **技术栈：** Python 标准库 HTTP 客户端、Base64、JSON、SiliconFlow REST API。
 
 **部署方式：** 调用外部 HTTPS API 的进程内适配器。
 
 **源码：** `src/ocr_client.py`。
+
+#### 3.2.7. 作答批改服务
+
+**名称：** 分步数学批改器
+
+**职责：** 将 OCR 规范化步骤的推导连续性分为完整、可接受省略、无法确认和逻辑断裂，并将数学有效性分为有效、无效和未知。可接受的常规代数跳步正常得分；双 OCR 不一致或 OCR 无法确认时暂停该步最终评分；只有两套 OCR 在关键数学内容上一致后，确认的错误才由本地规则与 SymPy 继续校验，后续步骤独立判断。
+
+**技术栈：** Python 数据类、枚举、正则表达式、SymPy，以及 DeepSeek 严格结构化输出。
+
+**部署方式：** 由 Web 入口以进程内模块调用。
+
+**源码：** `src/grader.py` 和 `src/deepseek_client.py`。
 
 ## 4. 数据存储
 
@@ -218,21 +230,35 @@ flowchart TD
 - `src/templates/result.html`；
 - 仓库根目录的 `result.html`，或用户通过 `--output` 指定的路径。
 
-**限制：** 本地 HTML 只是展示产物，不是可查询的审计数据库。v0.1 不持久化用户、会话、原始题目、模型调用、知识图谱版本或结构化解题历史。
+**限制：** 本地 HTML 只是展示产物，不是可查询的审计数据库。Web 运行诊断由下述 PostgreSQL 模式负责；当前仍不持久化用户账户、长期会话或知识图谱版本。
+
+### 4.3. PostgreSQL 运行记录
+
+**名称：** PostgreSQL `observability` 模式
+
+**用途：** 按一次 Web 请求保存可查询的诊断链路，包括输入元数据、OCR 结果、DeepSeek 请求与响应、提示词及 JSON Schema 版本、规范化步骤、逐步批改结果、最终分数和失败信息。
+
+**关键表：** `grading_runs`、`grading_trace_events`、`grading_step_evaluations` 和 `prompt_versions`。
+
+**图片边界：** 数据库只保存原始文件名、媒体类型、文件大小和 SHA-256，不保存图片字节，不在文件系统中另行备份。同一图片可对应多次独立运行记录。
+
+**故障边界：** `src/grading_trace.py` 采用尽力写入策略。未配置 PostgreSQL 或写入失败时只输出警告，不改变 OCR、求解和批改接口的原有结果。
+
+**初始化：** 依次使用 `db/migrations/001_create_observability_tables.sql` 创建模式、表、约束和索引，再使用 `db/migrations/002_add_dual_ocr_evidence.sql` 增加双 OCR 一致性证据字段；连接信息来自 `POSTGRES_DSN`，或 `POSTGRES_HOST`、`POSTGRES_PORT`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`。
 
 ## 5. 外部集成与 API
 
 **服务名称：** DeepSeek Chat Completions
 
-**用途：** 从用户确认后的题目文本中提取一个或多个 SymPy 表达式；当本地确定性路由无法充分判断时，从有限候选集合中选择 Task 或 Strategy 标识符。
+**用途：** 从题目文本中提取一个或多个 SymPy 表达式；当本地确定性路由无法充分判断时，从有限候选集合中选择 Task 或 Strategy 标识符；对 OCR 步骤进行连续性和数学有效性分类；生成 AI 参考解答。
 
 **集成方式：** 向 `https://api.deepseek.com/beta/chat/completions` 发送 HTTPS JSON 请求，使用严格函数调用模式和有限标识符枚举。凭据来自 `DEEPSEEK_API_KEY`。
 
-**服务名称：** SiliconFlow DeepSeek-OCR
+**服务名称：** SiliconFlow 双 OCR
 
-**用途：** 将 PNG、JPEG 或 WEBP 格式的题目图片转换为文本，并在求解前交由用户明确确认。
+**用途：** 将 PNG、JPEG 或 WEBP 格式的题目图片转换为两份独立文本，以便交叉核验公式、变量和运算符。
 
-**集成方式：** 使用 `deepseek-ai/DeepSeek-OCR` 模型，向 `https://api.siliconflow.cn/v1/chat/completions` 发送 HTTPS JSON 请求。凭据来自 `SILICONFLOW_API_KEY`。
+**集成方式：** 并行使用 `PaddlePaddle/PaddleOCR-VL-1.5` 和 `deepseek-ai/DeepSeek-OCR` 模型，向 `https://api.siliconflow.cn/v1/chat/completions` 发送 HTTPS JSON 请求。凭据来自 `SILICONFLOW_API_KEY`。
 
 **服务名称：** Neo4j 事务式 HTTP API
 
@@ -254,6 +280,7 @@ flowchart TD
 
 - 本地 Python 运行时；
 - 本地 Neo4j `math` 数据库，通常通过 Docker 容器提供；
+- 可选的本地 PostgreSQL `demo` 数据库，用于保存运行诊断记录；
 - DeepSeek 和 SiliconFlow 外部 API；
 - 本地默认浏览器；
 - MathJax CDN。
@@ -266,13 +293,14 @@ Windows 工作站
 │   ├── 命令行求解器，或
 │   └── 监听 127.0.0.1:8000 的本地 HTTP 服务
 ├── 监听 localhost:7474 的 Neo4j Docker 容器
+├── 监听 localhost:5432 的 PostgreSQL Docker 容器（可选）
 └── 浏览器
     └── 访问 MathJax CDN
 ```
 
 **CI/CD 流水线：** v0.1 尚未配置仓库级 CI/CD 工作流。发布或合并变更前，需要手动执行测试。
 
-**监控与日志：** 当前仅有控制台输出和可见的 HTTP 错误。尚无结构化日志规范、请求关联 ID、指标采集、分布式追踪、告警或持久化审计日志。
+**监控与日志：** 控制台继续输出 HTTP 请求和错误；配置 PostgreSQL 后，可按运行记录查询 OCR、模型调用、提示词版本、逐步判定和最终响应。当前仍没有指标采集、分布式追踪和告警系统。
 
 **打包方式：** 当前版本不包含 Dockerfile、Compose 文件、Python 包元数据、依赖锁定文件、发布制品自动化或生产部署配置。
 
@@ -291,7 +319,8 @@ Windows 工作站
 
 **现有安全机制与实践：**
 
-- API 凭据和 Neo4j 密码从环境变量或交互式密码输入读取，不硬编码到源码；
+- API 凭据、Neo4j 密码和 PostgreSQL 密码从环境变量或交互式密码输入读取，不硬编码到源码；
+- 上传图片本体不写入 PostgreSQL，只保存非内容元数据与 SHA-256；
 - 表达式在交给 SymPy 解析前必须通过受限字符集检查；
 - Task 和 Strategy 只能从 Neo4j 返回的有限标识符集合中选择；
 - 只有在本地注册的 Operation 处理器能够执行；
@@ -305,7 +334,7 @@ Windows 工作站
 - 缺少统一且适合公开返回的错误模型；
 - 缺少限流和请求身份认证；
 - 当前未实现 CSRF 防护，其前提是假设服务只监听回环地址；
-- 缺少持久化安全审计记录；
+- PostgreSQL 诊断记录尚未配置自动清理、脱敏、访问分级或保留期限；
 - 缺少依赖漏洞扫描和密钥扫描工作流；
 - 本地 Neo4j 与本地浏览器流量未启用 TLS；
 - 除受限解析器和可信 Operation 注册表外，没有额外执行沙箱；
@@ -351,7 +380,7 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 python -m unittest discover -s tests -v
 ```
 
-截至 2026-08-15，共发现 16 项测试，现已全部通过。测试范围包括：
+截至 2026-08-20，共发现 54 项测试，现已全部通过。测试范围包括：
 
 - 确定性 Task 路由和模型兜底路由；
 - 多任务识别与不支持任务的结果输出；
@@ -360,11 +389,15 @@ python -m unittest discover -s tests -v
 - 对称轴和最值的符号求解；
 - 仿射代换；
 - 展示结果规范化；
-- 已确认题目的完整性和本地小题编号。
+- 已确认题目的完整性和本地小题编号；
+- 单页工作台模板与上传表单契约；
+- 合理代数跳步、真实逻辑断裂和 OCR 无法确认状态；
+- 双 OCR 并行调用、复核失败降级、分歧不扣分和一致错误扣分；
+- PostgreSQL 运行记录、提示词版本复用和图片元数据边界。
 
 **代码质量工具：** v0.1 尚未配置格式化工具、代码检查器、静态类型检查器、覆盖率门禁、pre-commit 或自动化安全扫描器。
 
-**依赖管理：** `requirements.txt` 声明了 `sympy>=1.13`。外部 HTTP 集成使用 Python 标准库，依赖版本尚未完全锁定。
+**依赖管理：** `requirements.txt` 声明了 `sympy>=1.13`、`python-dotenv>=1.0` 和 `psycopg[binary]>=3.2`。外部 HTTP 集成使用 Python 标准库，依赖版本尚未完全锁定。
 
 ## 9. 未来规划
 

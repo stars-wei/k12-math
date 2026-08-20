@@ -5,6 +5,8 @@
 import json
 import os
 import re
+import time
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -17,11 +19,26 @@ SAFE_EXPRESSION = re.compile(r"^[0-9xX+\-*/().\s]+$")
 
 
 class DeepSeekClient:
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        trace_callback: Callable[[str, dict, int | None], None] | None = None,
+    ) -> None:
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         self.model = model or os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+        self.trace_callback = trace_callback
         if not self.api_key:
             raise ConfigurationError("未设置 DEEPSEEK_API_KEY，无法进行题目解析。")
+
+    def _emit_trace(self, stage: str, payload: dict, duration_ms: int | None = None) -> None:
+        """Report model diagnostics without allowing tracing to break grading."""
+        if self.trace_callback is None:
+            return
+        try:
+            self.trace_callback(stage, payload, duration_ms)
+        except Exception:
+            return
 
     def _tool_call(
         self,
@@ -57,6 +74,15 @@ class DeepSeekClient:
                 "function": {"name": tool_name},
             },
         }
+        trace_payload = {
+            "tool_name": tool_name,
+            "model": self.model,
+            "description": description,
+            "parameters": parameters,
+            "system": system,
+            "user": user,
+        }
+        self._emit_trace("deepseek_request", trace_payload)
         request = Request(
             API_URL,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -66,15 +92,32 @@ class DeepSeekClient:
             },
             method="POST",
         )
+        started_at = time.monotonic()
         try:
             with urlopen(request, timeout=60) as response:
                 payload = json.load(response)
         except HTTPError as error:
+            self._emit_trace(
+                "deepseek_error",
+                {"tool_name": tool_name, "model": self.model, "http_status": error.code},
+                round((time.monotonic() - started_at) * 1000),
+            )
             raise UpstreamServiceError(
                 f"DeepSeek 题目解析服务请求失败（HTTP {error.code}），请稍后重试。"
             ) from error
         except URLError as error:
+            self._emit_trace(
+                "deepseek_error",
+                {"tool_name": tool_name, "model": self.model, "error": str(error.reason)},
+                round((time.monotonic() - started_at) * 1000),
+            )
             raise UpstreamServiceError("无法连接 DeepSeek 题目解析服务，请检查网络后重试。") from error
+
+        self._emit_trace(
+            "deepseek_response",
+            {"tool_name": tool_name, "model": self.model, "response": payload},
+            round((time.monotonic() - started_at) * 1000),
+        )
 
         try:
             tool_calls = payload["choices"][0]["message"]["tool_calls"]
@@ -109,9 +152,15 @@ class DeepSeekClient:
                         out.append('\\\\')
                     elif char == '/':
                         out.append('/')
-                    elif char == 'n' and (i + 1 >= n or s[i+1] in {' ', '\n', '\r', '\t', '"', ',', '}', ']'}):
-                        # Genuine newline escape in JSON
-                        out.append('\\n')
+                    elif char == 'n':
+                        next_char = s[i + 1] if i + 1 < n else ''
+                        if next_char and next_char.isascii() and next_char.isalpha():
+                            # Preserve LaTeX commands such as \neq, \not and \nabla.
+                            out.append('\\\\n')
+                        else:
+                            # JSON newlines may be followed by another escape, punctuation,
+                            # a subquestion label, or non-ASCII text.
+                            out.append('\\n')
                     else:
                         # In LaTeX strings, \f in \frac, \r in \right, \b in \because, \t in \theta etc. must remain LaTeX backslashes!
                         out.append('\\\\' + char)
@@ -345,11 +394,24 @@ class DeepSeekClient:
             user=f"【题目】：{question}\n\n【学生手写/输入解题步骤】：\n{raw_steps_text}",
         )
 
-    def normalize_ocr_math_steps(self, raw_ocr_text: str) -> dict:
-        """Extract problem stem and perform mathematical semantic normalization on OCR steps."""
-        return self._tool_call(
+    def normalize_ocr_math_steps(
+        self,
+        raw_ocr_text: str,
+        secondary_ocr_text: str | None = None,
+    ) -> dict:
+        """Normalize one OCR result, optionally corroborated by a second model."""
+        if secondary_ocr_text:
+            user_prompt = (
+                "请对以下两套 OCR 文本进行逐步对照、结构化与连续性分类。"
+                "忽略空格、标点和等价 LaTeX 写法，只比较数学实质。\n\n"
+                f"【主 OCR：PaddleOCR】\n{raw_ocr_text}\n\n"
+                f"【复核 OCR：DeepSeek-OCR】\n{secondary_ocr_text}"
+            )
+        else:
+            user_prompt = f"请对以下原始 OCR 文本进行结构化与连续性分类：\n\n{raw_ocr_text}"
+        result = self._tool_call(
             "normalize_ocr_math_steps",
-            "将原始 OCR 数学文本忠实拆解为步骤，区分格式修正与代数实质内容，检测因果断裂与漏写疑点",
+            "将原始 OCR 数学文本忠实拆解为步骤，并分类相邻步骤之间的数学连续性与正确性",
             {
                 "type": "object",
                 "properties": {
@@ -371,7 +433,7 @@ class DeepSeekClient:
                                 },
                                 "step_text": {
                                     "type": "string",
-                                    "description": "忠实还原卷面文字的步骤描述（严禁私自篡改代数实质内容）",
+                                    "description": "忠实还原卷面文字的步骤描述（严禁私自篡改代数实质内容）；其中数学内容使用 KaTeX 支持的 LaTeX，行内公式用 \\(与\\)包裹",
                                 },
                                 "math_expression_latex": {
                                     "type": "string",
@@ -381,13 +443,49 @@ class DeepSeekClient:
                                     "type": "string",
                                     "description": "步骤意图（如：声明奇函数性质、代入求参b、代入求参a、得出解析式）",
                                 },
-                                "has_discontinuity": {
-                                    "type": "boolean",
-                                    "description": "是否检测到代数断裂/漏写未知数（如本式算不通但后文却解出未知数）",
-                                },
-                                "pedagogical_warning": {
+                                "continuity_status": {
                                     "type": "string",
-                                    "description": "若学生纸面上确实漏写，给出的教学扣分警示与不严谨诊断",
+                                    "enum": [
+                                        "complete",
+                                        "acceptable_omission",
+                                        "ambiguous",
+                                        "logical_break",
+                                    ],
+                                    "description": "相对于前面有效步骤的推导连续性分类",
+                                },
+                                "mathematical_validity": {
+                                    "type": "string",
+                                    "enum": ["valid", "invalid", "unknown"],
+                                    "description": "本步数学内容是否成立；OCR 无法确认时输出 unknown",
+                                },
+                                "ocr_agreement": {
+                                    "type": "string",
+                                    "enum": ["agree", "disagree", "uncertain", "not_checked"],
+                                    "description": (
+                                        "两套 OCR 对本步数学实质的识别是否一致；"
+                                        "只提供一套 OCR 时输出 not_checked"
+                                    ),
+                                },
+                                "secondary_ocr_evidence": {
+                                    "type": "string",
+                                    "description": (
+                                        "复核 OCR 中与本步对应的原始文字；没有复核结果时为空字符串。"
+                                        "其中每个数学表达式必须分别使用 KaTeX 行内定界符 \\( 与 \\) 包裹，"
+                                        "例如 \\(f(t)=\\frac{1-t}{1+t}\\)；"
+                                        "\\(f(x)=\\frac{1-x}{1+x}\\)"
+                                    ),
+                                },
+                                "verification_message": {
+                                    "type": "string",
+                                    "description": "说明两套 OCR 一致、冲突或无法对齐的依据",
+                                },
+                                "omitted_reasoning": {
+                                    "type": "string",
+                                    "description": "acceptable_omission 时补全的简短中间推导，其他状态输出空字符串；所有数学内容使用 KaTeX 支持的 LaTeX，行内公式用 \\(与\\)包裹",
+                                },
+                                "diagnostic_message": {
+                                    "type": "string",
+                                    "description": "对当前分类的客观说明，不直接决定是否扣分；普通说明使用中文，所有数学表达式、变量和数学符号使用 KaTeX 支持的 LaTeX，行内公式用 \\(与\\)包裹",
                                 },
                                 "ocr_fix_suggestion": {
                                     "type": "string",
@@ -404,8 +502,13 @@ class DeepSeekClient:
                                 "step_text",
                                 "math_expression_latex",
                                 "step_intent",
-                                "has_discontinuity",
-                                "pedagogical_warning",
+                                "continuity_status",
+                                "mathematical_validity",
+                                "ocr_agreement",
+                                "secondary_ocr_evidence",
+                                "verification_message",
+                                "omitted_reasoning",
+                                "diagnostic_message",
                                 "ocr_fix_suggestion",
                                 "format_fix_note",
                             ],
@@ -414,16 +517,59 @@ class DeepSeekClient:
                     },
                     "overall_summary": {
                         "type": "string",
-                        "description": "整体规范化与疑点分析总结",
+                        "description": "整体规范化与疑点分析总结；所有数学内容使用 KaTeX 支持的 LaTeX，行内公式用 \\(与\\)包裹",
                     },
                 },
                 "required": ["question_stem", "steps", "overall_summary"],
                 "additionalProperties": False,
             },
-            system="你是一个中学数学助教。请将原始 OCR 数学文本拆解为题目题干与步骤链，检测步骤中的代数断裂与格式问题。",
-            user=f"请对以下原始 OCR 文本进行结构化与断裂检测分析：\n\n{raw_ocr_text}",
+            system=(
+                "你是一个中学数学助教。请忠实地将原始 OCR 数学文本拆解为题目题干与步骤链，"
+                "并根据相邻步骤之间的数学推导关系，为每一步选择且仅选择一种连续性状态：\n"
+                "1. complete：已经写出理解当前结论所需的必要推导。\n"
+                "2. acceptable_omission：省略了约分、通分、移项、合并同类项、代入或简单方程求解等常规运算，"
+                "但当前结论能够从前面的有效步骤正确、唯一地推出。\n"
+                "3. ambiguous：由于 OCR 漏识别、公式残缺或卷面内容不清，无法确认学生原意或推导是否成立。\n"
+                "4. logical_break：即使补充合理的常规代数变形，当前结论仍然无法从前面的有效步骤推出，"
+                "或者使用了错误的运算、性质、公式或定理。\n"
+                "【双 OCR 证据规则】：如果同时提供主 OCR 与复核 OCR，请逐步比较数学实质。"
+                "两套 OCR 对会影响数学含义的变量、符号、系数或表达式识别不一致时，"
+                "ocr_agreement 必须输出 disagree，continuity_status 必须输出 ambiguous，"
+                "mathematical_validity 必须输出 unknown，不得将其中任意一套直接视为学生原文扣分。"
+                "无法可靠对齐对应步骤时输出 uncertain，并同样使用 ambiguous 与 unknown。"
+                "只有数学实质一致时才能输出 agree，并继续判断 valid 或 invalid。"
+                "只提供一套 OCR 时输出 not_checked。\n"
+                "【KaTeX 输出规范】：step_text、omitted_reasoning、diagnostic_message 和 overall_summary 中，"
+                "普通说明使用中文；所有数学表达式、变量和数学符号必须使用 KaTeX 支持的 LaTeX。"
+                "行内公式统一用 \\( 与 \\) 包裹，独立公式用 \\[ 与 \\] 包裹；"
+                "secondary_ocr_evidence 中的每个数学表达式也必须分别使用 \\( 与 \\) 包裹，"
+                "多个公式之间的中文标点必须放在定界符外；"
+                "所有分式（包括分子或分母中的嵌套分式）都必须使用 \\frac{分子}{分母}，"
+                "不得使用 / 表示分数；不要输出未包裹的 ASCII 算式，不要使用 Markdown 代码块。\n"
+                "示例一：由 \\(\\frac{\\frac{a}{2}}{1+\\frac{1}{4}}=\\frac{2}{5}\\) 直接得到 \\(a=1\\)，"
+                "应分类为 acceptable_omission。\n"
+                "示例二：由 \\(\\frac{1}{1+\\frac{1}{4}}=\\frac{2}{5}\\) 直接得到 \\(a=1\\)，"
+                "前式不含 \\(a\\)，应分类为 logical_break。"
+            ),
+            user=user_prompt,
         )
+        dual_ocr = bool(secondary_ocr_text)
+        for step in result.get("steps", []):
+            agreement = step.get("ocr_agreement", "not_checked")
+            if dual_ocr and agreement == "not_checked":
+                agreement = "uncertain"
+                step["ocr_agreement"] = agreement
+                step["verification_message"] = (
+                    step.get("verification_message")
+                    or "已提供两套 OCR，但模型未完成可靠对齐。"
+                )
+            elif not dual_ocr:
+                step["ocr_agreement"] = "not_checked"
 
+            if agreement in {"disagree", "uncertain"}:
+                step["continuity_status"] = "ambiguous"
+                step["mathematical_validity"] = "unknown"
+        return result
 
     def generate_standard_solution(self, question_stem: str) -> dict:
         """Generate high-school level ground-truth step-by-step mathematical solutions for all subquestions."""
