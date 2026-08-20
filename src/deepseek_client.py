@@ -425,3 +425,53 @@ class DeepSeekClient:
         )
 
 
+    def generate_standard_solution(self, question_stem: str) -> dict:
+        """Generate high-school level ground-truth step-by-step mathematical solutions for all subquestions."""
+        return self._tool_call(
+            "generate_standard_solution",
+            "为高中数学题目（包含单问或多问）生成高考满分标准的完整推导解答步骤与最终结果",
+            {
+                "type": "object",
+                "properties": {
+                    "question_stem": {
+                        "type": "string",
+                        "description": "规范化后的题目完整题干（LaTeX 格式）",
+                    },
+                    "subquestions": {
+                        "type": "array",
+                        "description": "各小问标准解答列表",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "题号标签，如（1）、（2）"},
+                                "question_content": {"type": "string", "description": "该小问的具体设问"},
+                                "core_method": {"type": "string", "description": "所用核心数学思想与方法（如：换元法、待定系数法、配方法、导数法）"},
+                                "solution_steps": {
+                                    "type": "array",
+                                    "description": "详细规范的推导步骤链（LaTeX 格式）",
+                                    "items": {"type": "string"}
+                                },
+                                "final_answer": {"type": "string", "description": "最终标准结论/答案（LaTeX 格式）"},
+                            },
+                            "required": ["label", "question_content", "core_method", "solution_steps", "final_answer"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "knowledge_points": {
+                        "type": "array",
+                        "description": "所考查的高中数学核心知识点列表",
+                        "items": {"type": "string"}
+                    },
+                    "method_summary": {
+                        "type": "string",
+                        "description": "名师解题思路点拨与方法归纳",
+                    },
+                },
+                "required": ["question_stem", "subquestions", "knowledge_points", "method_summary"],
+                "additionalProperties": False,
+            },
+            system="你是一位资深高中数学名师。请针对给出的题目题干，严格按照高考阅卷满分规范，输出条理清晰、步骤严谨、无跳步的完整标准解答。",
+            user=f"请为以下高中数学题生成完整标准解答：\n\n{question_stem}",
+        )
+
+
