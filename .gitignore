@@ -22,3 +22,8 @@ venv/
 *.code-workspace
 .DS_Store
 Thumbs.db
+
+# Local database data; keep reproducible SQL migrations under version control
+db/*
+!db/migrations/
+!db/migrations/*.sql
