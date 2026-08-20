@@ -1,4 +1,4 @@
-"""SiliconFlow DeepSeek-OCR client used by the local web entry point."""
+"""SiliconFlow dual-OCR client used by the local web entry point."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -13,7 +14,9 @@ from errors import ConfigurationError, UpstreamServiceError
 
 
 API_URL = "https://api.siliconflow.cn/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("OCR_MODEL", "PaddlePaddle/PaddleOCR-VL-1.5")
+PADDLE_OCR_MODEL = "PaddlePaddle/PaddleOCR-VL-1.5"
+DEEPSEEK_OCR_MODEL = "deepseek-ai/DeepSeek-OCR"
+DEFAULT_MODEL = os.getenv("OCR_MODEL", PADDLE_OCR_MODEL)
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
@@ -76,6 +79,41 @@ class OcrClient:
         
         cleaned = self._clean_repetitive_tail(text.strip())
         return cleaned
+
+    def transcribe_pair(
+        self,
+        image: bytes,
+        media_type: str,
+        primary_model: str | None = None,
+    ) -> dict:
+        """Run two independent OCR models concurrently for grading evidence."""
+        primary = primary_model or self.default_model
+        secondary = (
+            DEEPSEEK_OCR_MODEL
+            if primary != DEEPSEEK_OCR_MODEL
+            else PADDLE_OCR_MODEL
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            primary_future = executor.submit(self.transcribe, image, media_type, primary)
+            secondary_future = executor.submit(self.transcribe, image, media_type, secondary)
+
+            primary_text = primary_future.result()
+            secondary_text = None
+            secondary_error = None
+            try:
+                secondary_text = secondary_future.result()
+            except Exception as error:
+                # The primary OCR remains usable. The semantic layer will mark
+                # suspicious content as unverified when corroboration is absent.
+                secondary_error = str(error)
+
+        return {
+            "primary_model": primary,
+            "primary_text": primary_text,
+            "secondary_model": secondary,
+            "secondary_text": secondary_text,
+            "secondary_error": secondary_error,
+        }
 
     @staticmethod
     def _clean_repetitive_tail(text: str) -> str:

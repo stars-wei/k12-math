@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -24,6 +25,7 @@ from dotenv import load_dotenv
 
 from deepseek_client import DeepSeekClient
 from errors import friendly_message
+from grading_trace import create_trace_recorder, image_metadata
 from ocr_client import OcrClient
 from problem import Problem
 
@@ -51,24 +53,25 @@ def normalize_item_label(label: object, index: int, total: int) -> str:
     return f"（{number}）"
 
 
-def multipart_form(content_type: str, body: bytes) -> tuple[dict[str, str], bytes, str]:
+def multipart_form(content_type: str, body: bytes) -> tuple[dict[str, str], bytes, str, str]:
     """Read all fields and the image in the upload form without adding a web framework."""
     message = BytesParser(policy=default).parsebytes(
         f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode() + body
     )
     fields: dict[str, str] = {}
-    image, image_type = b"", "image/jpeg"
+    image, image_type, image_filename = b"", "image/jpeg", ""
     for part in message.iter_parts():
         name = part.get_param("name", header="content-disposition")
         value = part.get_payload(decode=True) or b""
         if name == "image":
             image = value
+            image_filename = part.get_filename() or ""
             ctype = part.get_content_type()
             if ctype and ctype not in {"application/octet-stream", "text/plain"}:
                 image_type = ctype
         elif name:
             fields[name] = value.decode(part.get_content_charset() or "utf-8", errors="replace").strip()
-    return fields, image, image_type
+    return fields, image, image_type, image_filename
 
 
 STUDIO_TEMPLATE = Path(__file__).with_name("templates") / "studio.html"
@@ -79,6 +82,15 @@ def make_handler():
         def log_message(self, format: str, *args) -> None:
             sys.stdout.write(f"[{self.log_date_time_string()}] {self.client_address[0]} - {format % args}\n")
             sys.stdout.flush()
+
+        def start_text_trace(self, payload: dict) -> None:
+            if self.trace is not None and self.trace.start("text"):
+                self.trace.event("request_input", {"endpoint": self.path, "payload": payload})
+
+        def deepseek_client(self) -> DeepSeekClient:
+            return DeepSeekClient(
+                trace_callback=self.trace.model_event if self.trace is not None else None
+            )
 
         def send_html(self, page: str, status: int = 200) -> None:
             try:
@@ -95,6 +107,15 @@ def make_handler():
                 return
 
         def send_json(self, payload: dict, status: int = 200) -> None:
+            trace = getattr(self, "trace", None)
+            if trace is not None:
+                if trace.trace_id is not None:
+                    payload.setdefault("trace_id", str(trace.trace_id))
+                if not trace.finalized:
+                    if status >= 400:
+                        trace.fail(payload.get("error", f"HTTP {status}"))
+                    else:
+                        trace.complete(payload)
             try:
                 data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
@@ -116,6 +137,7 @@ def make_handler():
             self.send_error(404)
 
         def do_POST(self) -> None:  # noqa: N802
+            self.trace = create_trace_recorder()
             print(f"📥 [REQUEST] POST {self.path} (来自 {self.client_address[0]})", flush=True)
             if self.path not in {"/api/ocr_test", "/api/grade", "/api/normalize_ocr", "/api/grade_steps", "/api/grade_photo", "/api/solve_standard", "/api/analyze"}:
                 self.send_error(404)
@@ -134,8 +156,7 @@ def make_handler():
                     content_type = self.headers.get("Content-Type", "")
                     if not content_type.startswith("multipart/form-data"):
                         raise ValueError("上传表单格式无效。")
-                    import time
-                    fields, image, image_type = multipart_form(content_type, body)
+                    fields, image, image_type, image_filename = multipart_form(content_type, body)
                     if not image:
                         raise ValueError("未接收到图片数据。")
                     
@@ -144,24 +165,71 @@ def make_handler():
                         raise ValueError("处理方式无效。")
                     selected_model = fields.get("model", "") or fields.get("question", "")
                     model_to_use = selected_model.strip() if selected_model and ("Paddle" in selected_model or "DeepSeek" in selected_model) else None
-                    
+
+                    metadata = image_metadata(image_filename, image_type, image)
+                    if self.trace is not None and self.trace.start("image", **metadata):
+                        self.trace.event(
+                            "request_input",
+                            {
+                                "endpoint": self.path,
+                                "intent": intent,
+                                "ocr_mode": "dual",
+                                "primary_ocr_model": model_to_use or OcrClient().default_model,
+                                "image": metadata,
+                            },
+                        )
+
                     t0 = time.time()
-                    # 1. OCR 识别
-                    raw_text = OcrClient().transcribe(image, image_type, model=model_to_use)
+                    # 1. 两套 OCR 并行识别
+                    ocr_pair = OcrClient().transcribe_pair(
+                        image,
+                        image_type,
+                        primary_model=model_to_use,
+                    )
+                    raw_text = ocr_pair["primary_text"]
+                    secondary_ocr_text = ocr_pair["secondary_text"]
                     t_ocr = time.time() - t0
-                    ds_client = DeepSeekClient()
+                    if self.trace is not None:
+                        self.trace.event(
+                            "ocr_result",
+                            {"role": "primary", "text": raw_text},
+                            duration_ms=round(t_ocr * 1000),
+                            model_name=ocr_pair["primary_model"],
+                        )
+                        if secondary_ocr_text:
+                            self.trace.event(
+                                "ocr_result",
+                                {"role": "secondary", "text": secondary_ocr_text},
+                                duration_ms=round(t_ocr * 1000),
+                                model_name=ocr_pair["secondary_model"],
+                            )
+                        elif ocr_pair["secondary_error"]:
+                            self.trace.event(
+                                "ocr_secondary_error",
+                                {
+                                    "model": ocr_pair["secondary_model"],
+                                    "message": ocr_pair["secondary_error"],
+                                },
+                            )
+                    ds_client = DeepSeekClient(
+                        trace_callback=self.trace.model_event if self.trace is not None else None
+                    )
 
                     # 若选择【纯题干标准求解】模式，直接生成高中数学高考满分标准步骤推导
                     if intent == "solve":
                         sol_res = ds_client.generate_standard_solution(raw_text)
+                        if self.trace is not None:
+                            self.trace.event("standard_solution", sol_res)
                         t_solve = time.time() - t0 - t_ocr
                         total_time = time.time() - t0
                         self.send_json({
                             "mode": "solve",
                             "raw_ocr_text": raw_text,
+                            "secondary_ocr_text": secondary_ocr_text,
+                            "ocr_models": [ocr_pair["primary_model"], ocr_pair["secondary_model"]],
                             "question_stem": sol_res.get("question_stem", raw_text),
                             "solution_data": sol_res,
-                            "model_used": model_to_use or OcrClient().default_model,
+                            "model_used": ocr_pair["primary_model"],
                             "timings": {
                                 "ocr_seconds": round(t_ocr, 2),
                                 "solver_seconds": round(t_solve, 2),
@@ -171,7 +239,12 @@ def make_handler():
                         return
 
                     # 2. 语义规范化与题干/步骤分离
-                    norm_res = ds_client.normalize_ocr_math_steps(raw_text)
+                    norm_res = ds_client.normalize_ocr_math_steps(
+                        raw_text,
+                        secondary_ocr_text=secondary_ocr_text,
+                    )
+                    if self.trace is not None:
+                        self.trace.event("normalized_steps", norm_res)
                     t_norm = time.time() - t0 - t_ocr
                     stem = norm_res.get("question_stem", "")
                     steps = norm_res.get("steps", [])
@@ -179,14 +252,18 @@ def make_handler():
                     # 若智能自适应模式下未检测到手写解题步骤，自动切为标准求解
                     if intent == "auto" and (not steps or len(steps) == 0):
                         sol_res = ds_client.generate_standard_solution(stem or raw_text)
+                        if self.trace is not None:
+                            self.trace.event("standard_solution", sol_res)
                         t_solve = time.time() - t0 - t_ocr - t_norm
                         total_time = time.time() - t0
                         self.send_json({
                             "mode": "solve",
                             "raw_ocr_text": raw_text,
+                            "secondary_ocr_text": secondary_ocr_text,
+                            "ocr_models": [ocr_pair["primary_model"], ocr_pair["secondary_model"]],
                             "question_stem": sol_res.get("question_stem", stem or raw_text),
                             "solution_data": sol_res,
-                            "model_used": model_to_use or OcrClient().default_model,
+                            "model_used": ocr_pair["primary_model"],
                             "timings": {
                                 "ocr_seconds": round(t_ocr, 2),
                                 "solver_seconds": round(t_solve, 2),
@@ -198,16 +275,20 @@ def make_handler():
                     # 3. 符号数学智能批改
                     from grader import grade_normalized_steps
                     report = grade_normalized_steps(stem, steps, ds_client)
+                    if self.trace is not None:
+                        self.trace.event("grading_report", report)
                     t_grade = time.time() - t0 - t_ocr - t_norm
                     total_time = time.time() - t0
                     self.send_json({
                         "mode": "grade",
                         "raw_ocr_text": raw_text,
+                        "secondary_ocr_text": secondary_ocr_text,
+                        "ocr_models": [ocr_pair["primary_model"], ocr_pair["secondary_model"]],
                         "question_stem": stem,
                         "normalized_steps": steps,
                         "overall_summary": norm_res.get("overall_summary", ""),
                         "grading_report": report,
-                        "model_used": model_to_use or OcrClient().default_model,
+                        "model_used": ocr_pair["primary_model"],
                         "timings": {
                             "ocr_seconds": round(t_ocr, 2),
                             "normalization_seconds": round(t_norm, 2),
@@ -219,39 +300,49 @@ def make_handler():
 
                 if self.path == "/api/solve_standard":
                     payload = json.loads(body.decode("utf-8"))
+                    self.start_text_trace(payload)
                     stem = payload.get("question_stem", "").strip()
                     if not stem:
                         raise ValueError("题干不能为空。")
-                    ds_client = DeepSeekClient()
+                    ds_client = self.deepseek_client()
                     sol_res = ds_client.generate_standard_solution(stem)
+                    if self.trace is not None:
+                        self.trace.event("standard_solution", sol_res)
                     self.send_json(sol_res)
                     return
 
                 if self.path == "/api/normalize_ocr":
                     payload = json.loads(body.decode("utf-8"))
+                    self.start_text_trace(payload)
                     raw_text = payload.get("raw_text", "").strip()
                     if not raw_text:
                         raise ValueError("待纠错的 OCR 文本不能为空。")
 
-                    client = DeepSeekClient()
+                    client = self.deepseek_client()
                     res = client.normalize_ocr_math_steps(raw_text)
+                    if self.trace is not None:
+                        self.trace.event("normalized_steps", res)
                     self.send_json(res)
                     return
 
                 if self.path == "/api/grade_steps":
                     payload = json.loads(body.decode("utf-8"))
+                    self.start_text_trace(payload)
                     question_stem = payload.get("question_stem", "").strip()
                     steps = payload.get("steps", [])
                     if not question_stem or not steps:
                         raise ValueError("题干与规范步骤链不能为空。")
                     from grader import grade_normalized_steps
-                    client = DeepSeekClient()
+                    client = self.deepseek_client()
                     report_dict = grade_normalized_steps(question_stem, steps, client)
+                    if self.trace is not None:
+                        self.trace.event("grading_report", report_dict)
                     self.send_json(report_dict)
                     return
 
                 if self.path == "/api/grade":
                     payload = json.loads(body.decode("utf-8"))
+                    self.start_text_trace(payload)
                     question = payload.get("question", "").strip()
                     steps_text = payload.get("steps_text", "").strip()
                     if not question or not steps_text:
@@ -259,7 +350,7 @@ def make_handler():
 
                     from grader import grade_solution, structure_student_steps
 
-                    client = DeepSeekClient()
+                    client = self.deepseek_client()
                     extracted = client.extract_problems(question)
                     items = extracted.get("items", [])
                     if not items:
@@ -272,35 +363,73 @@ def make_handler():
                     )
                     student_steps = structure_student_steps(question, steps_text, client)
                     report = grade_solution(problem, student_steps)
-                    self.send_json(report.to_dict())
+                    report_dict = report.to_dict()
+                    if self.trace is not None:
+                        self.trace.event("grading_report", report_dict)
+                    self.send_json(report_dict)
                     return
 
                 if self.path == "/api/ocr_test":
                     content_type = self.headers.get("Content-Type", "")
                     if not content_type.startswith("multipart/form-data"):
                         raise ValueError("上传表单格式无效。")
-                    import time
-                    fields, image, image_type = multipart_form(content_type, body)
+                    fields, image, image_type, image_filename = multipart_form(content_type, body)
                     if not image:
                         raise ValueError("未接收到图片数据。")
                     t0 = time.time()
                     selected_model = fields.get("model", "") or fields.get("question", "")
                     model_to_use = selected_model.strip() if selected_model and ("Paddle" in selected_model or "DeepSeek" in selected_model) else None
-                    text = OcrClient().transcribe(image, image_type, model=model_to_use)
+
+                    metadata = image_metadata(image_filename, image_type, image)
+                    if self.trace is not None and self.trace.start("image", **metadata):
+                        self.trace.event(
+                            "request_input",
+                            {
+                                "endpoint": self.path,
+                                "ocr_mode": "dual",
+                                "primary_ocr_model": model_to_use or OcrClient().default_model,
+                                "image": metadata,
+                            },
+                        )
+                    ocr_pair = OcrClient().transcribe_pair(
+                        image,
+                        image_type,
+                        primary_model=model_to_use,
+                    )
+                    text = ocr_pair["primary_text"]
+                    secondary_text = ocr_pair["secondary_text"]
                     elapsed = time.time() - t0
+                    if self.trace is not None:
+                        self.trace.event(
+                            "ocr_result",
+                            {"role": "primary", "text": text},
+                            duration_ms=round(elapsed * 1000),
+                            model_name=ocr_pair["primary_model"],
+                        )
+                        if secondary_text:
+                            self.trace.event(
+                                "ocr_result",
+                                {"role": "secondary", "text": secondary_text},
+                                duration_ms=round(elapsed * 1000),
+                                model_name=ocr_pair["secondary_model"],
+                            )
                     lines = [line.strip() for line in text.split("\n") if line.strip()]
                     self.send_json({
                         "text": text,
+                        "secondary_text": secondary_text,
                         "elapsed_seconds": round(elapsed, 2),
                         "char_count": len(text),
                         "lines": lines,
-                        "model_used": model_to_use or OcrClient().default_model,
+                        "model_used": ocr_pair["primary_model"],
+                        "ocr_models": [ocr_pair["primary_model"], ocr_pair["secondary_model"]],
                     })
                     return
             except Exception as error:
                 import traceback
                 print(f"❌ [ERROR] {self.path} 处理失败: {error}", flush=True)
                 traceback.print_exc()
+                if self.trace is not None:
+                    self.trace.fail(error)
                 self.send_json({"error": friendly_message(error)}, status=400)
 
     return Handler
